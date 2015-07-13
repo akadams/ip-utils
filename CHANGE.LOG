@@ -1,0 +1,4 @@
+$Id: CHANGE.LOG,v 1.1 2013/07/24 12:22:08 akadams Exp $
+
+07-24-13: Fixed bug in Logger.c, preventing mechanism type from matching. AKA
+
