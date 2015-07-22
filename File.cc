@@ -8,9 +8,7 @@
 #include <err.h>
 #include <errno.h>
 #include <unistd.h>
-
-#include <string>
-using namespace std;
+#include <stdlib.h>        // for random(3)
 
 #include "ErrorHandler.h"
 #include "File.h"
@@ -45,6 +43,23 @@ bool is_path_slash_terminated(const char* path) {
     return false;
   else
     return true;
+}
+
+string gen_random_string(size_t len) {
+  static char charset[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+  char* tmp_buf = NULL;
+
+  if ((tmp_buf = (char*)malloc(len + 1)) == NULL)
+    return "";
+
+  for (int i = 0; i < len; i++) {            
+    int index = random() % (int)(sizeof(charset) -1);
+    tmp_buf[i] = charset[index];
+  }
+  tmp_buf[len] = '\0';
+
+  string tmp_str = tmp_buf;
+  return tmp_str;
 }
 
 

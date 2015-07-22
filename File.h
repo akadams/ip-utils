@@ -33,6 +33,7 @@ const int kFileChunkSize = FILE_CHUNK_SIZE;
 // Non-class specific utility functions.
 bool is_path_tainted(const char* path);
 bool is_path_slash_terminated(const char* path);
+string gen_random_string(size_t len);
 
 /** Class for streaming & low-level file I/O.
  *

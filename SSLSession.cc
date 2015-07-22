@@ -410,6 +410,8 @@ bool SSLSession::AddMsgBuf(const char* framing_hdr, const ssize_t hdr_len,
   // MsgHdr in wpending_ and whdrs_ respectively.  But I'm not sure
   // that's a safe assumption!
 
+  // TODO(aka) Furthermore, this routine should be able to handle a NULL msg_body!
+
 #if DEBUG_MUTEX_LOCK
   warnx("SSLSession::AddMsgBuf(): requesting outgoing lock.");
 #endif

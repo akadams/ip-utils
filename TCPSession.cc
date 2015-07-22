@@ -293,7 +293,8 @@ string TCPSession::print(void) const {
 
   snprintf((char*)tmp_str.c_str(), kDefaultBufSize, 
            "%s:%d:%lu:%ld:%ld:%s:%ld:%ld:%ld:%ld:%ld", 
-           TCPConn::print().c_str(), handle_, rtid_, (long)rbuf_size_, (long)rbuf_len_, 
+           TCPConn::print().c_str(), handle_, (unsigned long)rtid_, 
+           (long)rbuf_size_, (long)rbuf_len_, 
            rfile_.print().c_str(), (long)wbuf_size_, (long)wbuf_len_,
            (long)wfiles_.size(), (long)wpending_.size(), (long)whdrs_.size());
 
@@ -409,6 +410,8 @@ bool TCPSession::AddMsgBuf(const char* framing_hdr, const ssize_t hdr_len,
   // that the next hdr & body in wbuf_ will match the next MsgInfo and
   // MsgHdr in wpending_ and whdrs_ respectively.  But I'm not sure
   // that's a safe assumption!
+
+  // TODO(aka) Furthermore, this routine should be able to handle a NULL msg_body!
 
 #if DEBUG_MUTEX_LOCK
   warnx("TCPSession::AddMsgBuf(): requesting outgoing lock.");
