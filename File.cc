@@ -52,7 +52,7 @@ string gen_random_string(size_t len) {
   if ((tmp_buf = (char*)malloc(len + 1)) == NULL)
     return "";
 
-  for (int i = 0; i < len; i++) {            
+  for (int i = 0; i < (int)len; i++) {            
     int index = random() % (int)(sizeof(charset) -1);
     tmp_buf[i] = charset[index];
   }
