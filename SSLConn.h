@@ -306,7 +306,14 @@ class SSLConn : public TCPConn {
 
  protected:
   // Data members.
+
+  // XXX TODO(aka) This should simply be passed in during the Socket
+  // and Accept calls.  It's internally referenced counted, so it
+  // can't even be const.  Besides, there's no reason to have it
+  // anyways!
+
   const SSLContext* ctx_;   // pointer to the non-editable OpenSSL *context* that we are using
+
   SSL* ssl_;                // OpenSSL *connection* object.  Note, this
                             // object needs referenced counted,
                             // however, since SSL objects are

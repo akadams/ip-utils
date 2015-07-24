@@ -23,6 +23,8 @@ using namespace std;
 
 #define URL_NAT_PROXY "NAT-PROXY"
 
+const size_t kURLMaxSize = (1024 * 4);
+
 // Non-class specific defines & data structures.
 struct url_query_info {
   string key;

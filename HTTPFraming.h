@@ -22,9 +22,11 @@ using namespace std;
 #define HTTPFRAMING_VERSION_MINOR 1
 
 #define HTTPFRAMING_STATUS_CODE_NULL 0
-#define HTTPFRAMING_DEFAULT_HDR_SIZE (4 * 1024)
+#define HTTPFRAMING_DEFAULT_HDR_SIZE (1024 * 4)
 
 #define HTTPFRAMING_SCHEME "http"
+
+const size_t kHTTPMsgBodyMaxSize = (1024 * 4);
 
 // Forward declarations (used if only needed for member function parameters).
 
