@@ -30,7 +30,7 @@ SSLConn::SSLConn(void) {
   warnx("SSLConn::SSLConn(void) called.");
 #endif
 
-  ctx_ = NULL;
+  // XXX ctx_ = NULL;
   ssl_ = NULL;
   peer_certificate_ = NULL;
 }
@@ -51,7 +51,7 @@ SSLConn::~SSLConn(void) {
     ssl_ = NULL;
   }
 
-  ctx_ = NULL;  // ctx_ object is const, so we can't do anything with it anyways
+  // XXX ctx_ = NULL;  // ctx_ object is const, so we can't do anything with it anyways
   
   // Rest of work is done in IPComm (via TCPConn).
 }
@@ -63,7 +63,7 @@ SSLConn::SSLConn(const SSLConn& src)
   warnx("SSLConn::SSLConn(const SSLConn&) called.");
 #endif
 
-  ctx_ = src.ctx_;
+  // XXX ctx_ = src.ctx_;
   ssl_ = src.ssl_;  // note, ref count in Descriptor is bumped in IPComm copy constructor
 
   peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
@@ -74,7 +74,7 @@ SSLConn& SSLConn::operator =(const SSLConn& src) {
   warnx("SSLConn::operator =(const SSLConn&) called.");
 #endif
 
-  ctx_ = src.ctx_;
+  // XXX ctx_ = src.ctx_;
 
   // If we're about to blow away our IPComm -> Descriptor, then we
   // need to blow away our SSL* object before setting it to the new one.
@@ -106,7 +106,7 @@ int SSLConn::operator ==(const SSLConn& other) const {
 
 // Mutators.
 void SSLConn::clear(void) {
-  ctx_ = NULL;
+  // XXX ctx_ = NULL;
 
   // If we're about to blow away our IPComm -> Descriptor, then we
   // need to blow away our SSL* object before setting it to the new one.
@@ -138,37 +138,36 @@ string SSLConn::print(void) const {
   return tmp_str;
 }
 
-// Routine to initialize our SSLConn with an SSLContext.
+// Routine to initialize our SSLConn.
 //
 // Note, this routine can set an ErrorHandler event.
-void SSLConn::Init(const SSLContext& ctx, 
-                   const char* host, const int address_family, int retry_cnt) {
+void SSLConn::Init(const char* host, const int address_family, int retry_cnt) {
   IPComm::Init(host, address_family, retry_cnt);
   if (error.Event()) {
     error.AppendMsg("SSLConn::Init(): ");
     return;
   }
 
-  ctx_ = &ctx;
+  // XXX ctx_ = &ctx;
 }
 
-// Routine to initialize our SSLConn with an SSLContext.
+// Routine to initialize our SSLConn as a server.
 //
 // Note, this routine can set an ErrorHandler event.
-void SSLConn::InitServer(const SSLContext& ctx, const int address_family) {
+void SSLConn::InitServer(const int address_family) {
   IPComm::InitServer(address_family);
   if (error.Event()) {
     error.AppendMsg("SSLConn::InitServer(): ");
     return;
   }
 
-  ctx_ = &ctx;
+  // XXX ctx_ = &ctx;
 }
 
 // Routine to open a socket.
 //
 // Note, this routine can set an ErrorHandler event.
-void SSLConn::Socket(const int domain, const int type, const int protocol) {
+void SSLConn::Socket(const int domain, const int type, const int protocol, SSLContext* ctx) {
   IPComm::Socket(domain, type, protocol);
   if (error.Event()) {
     error.AppendMsg("SSLConn::Socket(): ");
@@ -178,8 +177,8 @@ void SSLConn::Socket(const int domain, const int type, const int protocol) {
   // Okay, we now have a file desciptor, so get a SSL* object (which
   // we reference count via the Descriptor ojbect).
 
-  SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
-  if ((ssl_ = SSL_new(ctx)) == NULL) {
+  // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
+  if ((ssl_ = SSL_new(ctx->ctx())) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Socket(): SSL_new(3) failed: %s", ssl_err_str().c_str());
     return;
   }
@@ -359,7 +358,7 @@ void SSLConn::Connect(void) {
 // passes in the peer's SSLConn object.
 //
 // Note, this routine can set an ErrorHandler event.
-void SSLConn::Accept(SSLConn* peer) const {
+void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
   if (ssl_ == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL* object NULL!");
     return;
@@ -383,8 +382,8 @@ void SSLConn::Accept(SSLConn* peer) const {
   // we reference count via the Descriptor ojbect), then associate our
   // TCP file descriptor to it.
 
-  SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
-  if ((peer->ssl_ = SSL_new(ctx)) == NULL) {
+  // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
+  if ((peer->ssl_ = SSL_new(ctx->ctx())) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_new(3) failed: %s", ssl_err_str().c_str());
     return;
   }

@@ -76,7 +76,7 @@ class SSLConn : public TCPConn {
   int operator ==(const SSLConn& other) const;
 
   // Accessors.
-  const SSLContext* ctx(void) const { return ctx_; }
+  // XXX const SSLContext* ctx(void) const { return ctx_; }
   const SSL* ssl(void) const { return ssl_; }
   const X509* peer_certificate(void) const { return peer_certificate_; }
 
@@ -107,15 +107,14 @@ class SSLConn : public TCPConn {
    *  @param address_family is an int specifying the address family
    *  @param retry_cnt controls address resolution attempts
    */
-  void Init(const SSLContext& ctx, const char* host, const int address_family, int retry_cnt);
+  void Init(const char* host, const int address_family, int retry_cnt);
 
   /** Routine to initialize an IPComm object.
    *
    *  Work beyond what is suitable for the class constructor needs to
    *  be performed. This simply entails calling IPComm:Init() to
    *  install the wildcard Internet address (either INADDR_ANY or
-   *  in6addr_any) depending on what address family is passed in, and
-   *  associating this SSLConn object to a SSLContext object.
+   *  in6addr_any) depending on what address family is passed in.
    *
    *  Note, this routine can set an ErrorHandler event if it
    *  encounters an unrecoverable error.
@@ -125,7 +124,7 @@ class SSLConn : public TCPConn {
    *  @see IPComm::Setsockopt()
    *  @param address_family is an int specifying the address family
    */
-  void InitServer(const SSLContext& ctx, const int address_family);
+  void InitServer(const int address_family);
 
   /** Routine to request a socket from the kernel.
    *
@@ -143,7 +142,7 @@ class SSLConn : public TCPConn {
    *  @param type an int specifying communication semantics
    *  @param protocol an int specifying the communication protocol
    */
-  void Socket(const int domain, const int type, const int protocol);
+  void Socket(const int domain, const int type, const int protocol, SSLContext* ctx);
 
   /** Routine to issue a connect(2) to the destination within our object.
    *
@@ -175,7 +174,7 @@ class SSLConn : public TCPConn {
    *  @see ErrorHandler
    *  @param peer a SSLConn* to hold the new socket
    */
-  void Accept(SSLConn* peer) const;
+  void Accept(SSLConn* peer, SSLContext* ctx) const;
 
   /** Routine to create a new SSLConn object from a completed connection.
    *
@@ -312,7 +311,7 @@ class SSLConn : public TCPConn {
   // can't even be const.  Besides, there's no reason to have it
   // anyways!
 
-  const SSLContext* ctx_;   // pointer to the non-editable OpenSSL *context* that we are using
+  // XXX const SSLContext* ctx_;   // pointer to the non-editable OpenSSL *context* that we are using
 
   SSL* ssl_;                // OpenSSL *connection* object.  Note, this
                             // object needs referenced counted,
