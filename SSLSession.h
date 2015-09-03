@@ -203,7 +203,7 @@ class SSLSession : public SSLConn {
 
   // Boolean checks.
   bool IsSynchroniationEnabled(void) const { return synchronize_connection_; }
-  bool IsIncomingDataInitialized(void) const {
+  bool IsIncomingMsgInitialized(void) const {
     return (rpending_.initialized == 1) ? true : false; }
   bool IsIncomingStorageInitialized(void) const { 
     return rpending_.storage_initialized; }

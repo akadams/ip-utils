@@ -202,6 +202,7 @@ class MsgHdr {
   void set_msg_id(uint16_t msg_id);
   void set_type(uint8_t type);
   void set_hdr(const HdrStorage& hdr);
+  void set_body_len(const size_t body_len);
   void clear(void);
 
   // MsgHdr manipulation.
@@ -213,7 +214,7 @@ class MsgHdr {
 
   /** A routine to write the header to a buffer.
    *
-   *  This routine relies should produce a buffer suitable to act as
+   *  This routine should produce a buffer suitable to act as
    *  the message-header in a message.
    */
   string print_hdr(const int offset) const;
@@ -249,19 +250,28 @@ class MsgHdr {
    *  type, or calls the InitFromBuf() member function from the
    *  class-based framing type.  In either case, if we were successful
    *  at building a *complete* framing header, we return TRUE and
-   *  populate our HdrStorage with the correct framing object.
-   *
-   *  TODO(aka) This routine should return the amount of data from buf
-   *  that was used to initialize our object, not simply a bool!
+   *  populate our HdrStorage with the correct framing object.  Since
+   *  some framing methods, e.g., HTTP, support multiple methods to
+   *  actuallly *frame* the data, e.g., chunking as opposed to simply
+   *  using Content-Length, and with *chunking* you don't know how big
+   *  the message-body is until you've read it all, the benefit of
+   *  reading just the header is reduced.  Thus, unfortunately, we are
+   *  additionally forced to use a buffer to hold the message-body
+   *  in-case the message-body needs to be slurped up all at once (as
+   *  in HTTP's chunking).
    *
    *  Note, This routine will set an ErrorHandler event if it
    *  encounters an unrecoverable error.
    *
    *  @see ErrorHandler Class
    *  @param buf is a character buffer
+   *  @param bytes_used is a size_t* to return the amount of data used in buf
+   *  @param chunked_msg_body a char** to hold the message-body if chunking set
+   *  @param chunked_msg_body_size a size_t* showing current size of chunk buffer
    *  @return a pointer to any remaining data in the stream
    */
-  size_t InitFromBuf(const char* buf, const size_t len);
+  bool InitFromBuf(const char* buf, const size_t len, size_t* bytes_used,
+                   char** chunked_msg_body, size_t* chunked_msg_body_size);
 
   // Boolean checks.
 
@@ -282,7 +292,9 @@ class MsgHdr {
   // Data members.
   uint16_t msg_id_;             // unique message id
 
-  // XXX Put this in HdrStorage!
+  // TODO(aka) XXX Put type_ this in HdrStorage!  But I'm not sure
+  // what the buys us, we still need to know what type_ is in MsgHdr.
+
   uint8_t type_;                // type of framing header we are
 
   HdrStorage hdr_;              // our *possible* headers

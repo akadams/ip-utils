@@ -16,7 +16,7 @@ using namespace std;
 #include "HTTPFraming.h"
 
 #define DEBUG_CLASS 0
-#define DEBUG_PARSE 0
+#define DEBUG_PARSE 1
 
 // Non-class specific defines & data structures.
 #define SCRATCH_BUF_SIZE (1024 * 4)  // big enough to hold HTTP header
@@ -235,6 +235,24 @@ string HTTPFraming::content_type(void) const {
 
   // If we made it here, we didn't find a 'Content-Type' field.
   return "NULL-Content-Type";
+}
+
+// Routine to return the 'Transfer-Encoding' field-name.
+string HTTPFraming::transfer_encoding(void) const {
+  vector<struct rfc822_msg_hdr>::const_iterator msg_hdr = msg_hdrs_.begin();
+  while (msg_hdr != msg_hdrs_.end()) {
+    if (strlen(msg_hdr->field_name.c_str()) == strlen(MIME_TRANSFER_ENCODING)) {
+      if (!strncasecmp(msg_hdr->field_name.c_str(), MIME_TRANSFER_ENCODING, 
+                       strlen(MIME_TRANSFER_ENCODING))) {
+        return msg_hdr->field_value;
+      }
+    }
+
+    msg_hdr++;
+  }
+
+  // If we made it here, we didn't find a 'Transfer-Encoding' field.
+  return "";
 }
 
 struct rfc822_msg_hdr HTTPFraming::msg_hdr(const char* field_name) const {
@@ -458,28 +476,33 @@ void HTTPFraming::InitResponse(const int code, const int connection) {
 }
 
 // Routine to (attempt to) build a HTTPFraming object (basically, the
-// HTTP headers) from a char* buffer.  If we succeed at building the
-// full headers, i.e., we successfully parse up to the CRLFCRLF combo,
-// then we remove the header from rbuf_ and return the boolean TRUE.
+// HTTP headers) from a char* buffer (e.g., the data returned from the
+// network ead call).  If we succeed at building the full headers,
+// i.e., we successfully parse up to the CRLFCRLF combo, then we
+// remove the header from rbuf_ and return the boolean TRUE, so that
+// the calling routine can process the message-body remaining in buf.
+// However, if the sender encoded the message body using *chunking*,
+// then this routine returns the NULL-terminated de-chunked message
+// body in the buffer (chunked_msg_body) passed into this routine.
 //
 // This routine can set an ErrorHandler event.
-size_t HTTPFraming::InitFromBuf(const char* buf, const size_t len, 
-                                const in_port_t default_port) {
+bool HTTPFraming::InitFromBuf(const char* buf, const size_t len, 
+                              const in_port_t default_port, size_t* bytes_used,
+                              char** chunked_msg_body, 
+                              size_t* chunked_msg_body_size) {
   clear();  // start from scratch
 
   if (buf == NULL) {
     error.Init(EX_SOFTWARE, "HTTPFraming::InitFromBuf(): buf is NULL");
-    return 0;
+    return false;
   }
 
-  // Note, this routine (and any that it calls) will return '0' until
-  // *sufficient* data is in the buffer to complete what ever task was
-  // asked of it.  That is, for this top-level routine, we must read
-  // the "CRLF" marking the end of the message header(s) to *not*
-  // return 0.
-
-  // See what type of HTTP message this is (and if we have enough
-  // data, obviously).
+  // Note, this routine (and any that it calls) will return false
+  // until *sufficient* data is in the buffer to complete what ever
+  // task was asked of it.  That is, for this top-level routine, we
+  // must read the "CRLF" marking the end of the message header(s) to
+  // *not* return false.  Moreover, if chunking was specified, then we
+  // must read all of the message-body, as well.
 
   size_t n = len;  // set aside byte cnt
   const char* buf_ptr = buf;  // setup a walk pointer
@@ -488,37 +511,43 @@ size_t HTTPFraming::InitFromBuf(const char* buf, const size_t len,
     n--;
   }
 
+  // See what type of HTTP message this is (and if we have enough
+  // data, obviously).
+
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::InitFromBuf(): buf[%ld]: %s.",
-          (len - n), buf_ptr);
+  _LOGGER(LOG_NOTICE, "HTTPFraming::InitFromBuf(): buf[%ld]: %s.",
+          len - n, buf_ptr);
 #endif
 
   if (strlen(buf_ptr) <= strlen(kHTTPSlash))
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Proceed depending on the first element of the status-line ...
-  size_t m = 0;
+  bool ret_val = false;
+  size_t parse_bytes_used = 0;
   if (strncasecmp(kMethodGet, buf_ptr, strlen(kMethodGet)) == 0)
-    m = ParseRequestHdr(buf_ptr, n, default_port);
+    ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kMethodHead, buf_ptr, strlen(kMethodHead)) == 0) 
-    m = ParseRequestHdr(buf_ptr, n, default_port);
+    ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kMethodPost, buf_ptr, strlen(kMethodPost)) == 0)
-    m = ParseRequestHdr(buf_ptr, n, default_port);
+    ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kMethodPut, buf_ptr, strlen(kMethodPut)) == 0)
-    m = ParseRequestHdr(buf_ptr, n, default_port);
+    ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kHTTPSlash, buf_ptr, strlen(kHTTPSlash)) == 0) 
-    m = ParseResponseHdr(buf_ptr, n);
+    ret_val = ParseResponseHdr(buf_ptr, n, &parse_bytes_used,
+                               chunked_msg_body, chunked_msg_body_size);
   else {
     // ERROR ...
     error.Init(EX_SOFTWARE, "HTTPFraming::InitFromBuf(): "
                "unknown status-line: %s", buf_ptr);
-    return 0;
+    return false;
   }
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::InitFromBuf(): after parse, "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::InitFromBuf(): after parse, "
           "bytes used: %ld, error flag: %d, buf[%ld]: %s.",
-          m, error.Event(), (len - n) + m, buf_ptr + m);
+          *bytes_used, error.Event(), (len - (n + *bytes_used)),
+          buf_ptr + *bytes_used);
 #endif
 
   if (error.Event()) {
@@ -526,11 +555,19 @@ size_t HTTPFraming::InitFromBuf(const char* buf, const size_t len,
     // return.
 
     error.AppendMsg("HTTPFraming::InitFromBuf(): ");
-    return 0;
+    return false;
   }
 
-  // We may or may not have parsed the header, either way head back.
-  return ((len - n) + m);
+  if (!ret_val)
+    return false;  // not enough data
+
+  *bytes_used = parse_bytes_used + n;
+
+  // Note, if the message-body was chunked, [SSL|TCP]Session should
+  // add the de-chunked body back in rbuf_ and add a Content-Length
+  // MsgHdr.
+
+  return true;
 }
 
 // Routine to append a message-header to the HTTPFraming object.
@@ -605,8 +642,9 @@ void HTTPFraming::AppendMsgHdr(const char* field_name, const char* field_value,
 // Routine to process a HTTP message header as a request.
 //
 // Note, this routine can set an ErrorHandler event.
-size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
-                                    const in_port_t default_port) {
+bool HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
+                                  const in_port_t default_port, 
+                                  size_t* bytes_used) {
   if (buf == NULL) {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): buf is NULL");
     return 0;
@@ -628,7 +666,7 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
   size_t n = len;  // set aside byte cnt
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): buf[%ld]: %s, %hu.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): buf[%ld]: %s, %hu.",
           n, buf, default_port);
 #endif
 
@@ -642,7 +680,7 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
   // of 3 chars!  So at least make sure we've got that much data.
 
   if (n < 16)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get method_ (based on sizeof method string).
   if (strncasecmp(kMethodGet, buf_ptr, strlen(kMethodGet)) == 0) {
@@ -665,11 +703,11 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     // ERROR ...
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "unknown method: %s", buf_ptr);
-    return 0;
+    return false;
   }
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): method: %d, "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): method: %d, "
           "buf ptr (%ld): %s.",
           method_, (len - n), buf_ptr);
 #endif
@@ -680,22 +718,22 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
   if (*buf_ptr != ' ') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected SP, got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip SP
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // TODO(aka) Note, until URL::set_Host() checks for a *complete*
   // host name, there is a small chance that we could get hosed here.
 
   size_t m = uri_.InitFromBuf(buf_ptr, n, default_port);
   if (m == 0 || ((n -= m) == 0))
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   buf_ptr += m;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): URI: %s, "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): URI: %s, "
           "buf[%ld]: %s.",
           uri_.print().c_str(), (len - n), buf_ptr);
 #endif
@@ -705,11 +743,11 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     // TODO(aka) Hmm, an HTTP/0.9 request?
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected SP, got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip SP
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get version.
   if (n > strlen(kHTTPSlash) &&
@@ -717,7 +755,7 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     buf_ptr += strlen(kHTTPSlash);  // skip over "HTTP/"
     n -= strlen(kHTTPSlash);
   } else {
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   }
 
   // Get the "major_" version number.
@@ -727,7 +765,7 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate number
   major_ = strtol(scratch_buffer, (char**)NULL, 10);
 
@@ -735,11 +773,11 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
   if (*buf_ptr != '.') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): TODO(aka) "
                "expected \'.\', got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '.'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get the "minor" version number.
   ptr = &scratch_buffer[0];
@@ -748,12 +786,12 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate number
   minor_ = strtol(scratch_buffer, (char**)NULL, 10);
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): version: %d.%d, "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): version: %d.%d, "
           "buf[%ld]: %s.",
           major_, minor_, (len - n), buf_ptr);
 #endif
@@ -768,34 +806,34 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     error.Init(EX_SOFTWARE, "HTTPFraming::Parse_Request_Hdr(): "
                "received unknown HTTP header version: %d.%d", 
                major_, minor_);
-    return 0;
+    return false;
   }
 
   // End of Request-Line: expecting CRLF (anything else, not ready!)
   if (*buf_ptr != '\r') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected '\r', got: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '\r'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   if (*buf_ptr != '\n') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '\n'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // At this point, we can either have a CRLF signifying end of 
   // "message headers" and *possible* start of "message body", or
   // we *should* see some "message headers".
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): "
           "after Request-Line(%ld): %s.", (len - n), buf_ptr);
 #endif
 
@@ -804,12 +842,12 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     size_t m = ParseMsgHdr(buf_ptr, n);
     if (m == 0 || ((n -= m) == 0)) {
       msg_hdrs_.clear();
-      return 0;  // not enough data yet
+      return false;  // not enough data yet
     }
     buf_ptr += m;
 
 #if DEBUG_PARSE
-    _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): "
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): "
             "next msg-hdr(%ld): %s.", (len - n), buf_ptr);
 #endif
   }
@@ -821,42 +859,48 @@ size_t HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected '\r', got: %s at cnt: %ld", buf_ptr, (len - n));
     msg_hdrs_.clear();
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '\r'
   if (--n == 0) {
     msg_hdrs_.clear();
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   }
 
   if (*buf_ptr != '\n') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
                "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
     msg_hdrs_.clear();
-    return 0;
+    return false;
   }
-
-  // Not necessary to increment buf_ptr here.
-  n--;  // skip *expected* '\n'
+  buf_ptr++;  // skip '\n'
+  if (--n == 0) {
+    msg_hdrs_.clear();
+    return false;  // not enough data yet
+  }
 
   // Okay, end of header, so mark location.
   msg_type_ = HTTPFraming::REQUEST;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseRequestHdr(): buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseRequestHdr(): buf[%ld]: %s.",
           (len - n), buf_ptr);
 #endif
-  return (len - n);  // amount of data used in buf
+  *bytes_used = (len - n);  // amount of data used from buf
+
+  return true;
 }
 
 // Routine to process a HTTP message header as a response.
 //
 // Note, this routine can set an ErrorHandler event.
-size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
+bool HTTPFraming::ParseResponseHdr(const char* buf, const size_t len,
+                                   size_t* bytes_used, char** chunked_msg_body, 
+                                   size_t* chunked_msg_body_size) {
   if (buf == NULL) {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "buf is NULL");
-    return 0;
+    return false;
   }
 
   // Note, the header is comprised of:
@@ -875,7 +919,7 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
   size_t n = len;  // set aside byte cnt
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): buf[%ld]: %s.",
           n, buf);
 #endif
 
@@ -891,7 +935,7 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
     buf_ptr += strlen(kHTTPSlash);  // skip over "HTTP/"
     n -= strlen(kHTTPSlash);
   } else {
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   }
 
   // Get the "major_" version number.
@@ -901,7 +945,7 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate number
   major_ = strtol(scratch_buffer, (char**)NULL, 10);
 
@@ -909,11 +953,11 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
   if (*buf_ptr != '.') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected \'.\', got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '.'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get the "minor" version number.
   ptr = &scratch_buffer[0];
@@ -922,12 +966,12 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate number
   minor_ = strtol(scratch_buffer, (char**)NULL, 10);
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): version: %d.%d, "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): version: %d.%d, "
           "buf[%ld]: %s.",
           major_, minor_, (len - n), buf_ptr);
 #endif
@@ -942,33 +986,32 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "received unknown HTTP header version: %d.%d", 
                major_, minor_);
-    return 0;
+    return false;
   }
 
   // We *should* be sitting on a space (and we have data).
   if (*buf_ptr != ' ') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected SP, got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip SP
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get the status code.
-  ptr = &scratch_buffer[0];
   ptr = &scratch_buffer[0];
   while (n > 0 && isdigit(*buf_ptr)) {
     *ptr++ = *buf_ptr++;
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate code
   set_status_code(strtol(scratch_buffer, (char**)NULL, 10));
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
           "status code %d, buf[%ld]: %s.",
           status_code_, (len - n), buf_ptr);
 #endif
@@ -977,11 +1020,11 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
   if (*buf_ptr != ' ') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected SP, got char: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip SP
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // Get the status phrase.
   ptr = &scratch_buffer[0];
@@ -990,12 +1033,12 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
     n--;
   }
   if (n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   *ptr = '\0';	// null terminate phrase
   string status_phrase = scratch_buffer;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
           "status phrase %s, buf[%ld]: %s.",
           status_phrase.c_str(), (len - n), buf_ptr);
 #endif
@@ -1004,27 +1047,27 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
   if (*buf_ptr != '\r') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected '\r', got: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '\r'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   if (*buf_ptr != '\n') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
-    return 0;
+    return false;
   }
   buf_ptr++;  // skip '\n'
   if (--n == 0)
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
 
   // At this point, we can either have a CRLF signifying end of 
   // "message headers" and *possible* start of "message body", or
   // we *should* see some "message headers".
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): "
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
           "after status-line(%ld): %s.", (len - n), buf_ptr);
 #endif
 
@@ -1032,44 +1075,75 @@ size_t HTTPFraming::ParseResponseHdr(const char* buf, const size_t len) {
   while (*buf_ptr != '\r') {
     size_t m = ParseMsgHdr(buf_ptr, n);
     if (m == 0 || ((n -= m) == 0)) {
+      if (error.Event())
+        error.AppendMsg("HTTPFraming::ParseResponseHdr(): ");
+
       msg_hdrs_.clear();
-      return 0;  // not enough data yet
+      return false;  // not enough data yet
     }
     buf_ptr += m;
 
 #if DEBUG_PARSE
-    _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): "
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
             "next msg-hdr(%ld): %s.", (len - n), buf_ptr);
 #endif
   }
 
-  // Note, any returns from here on out must clear msg_hdrs_.
+  // Note, any non-success returns from here on out must clear msg_hdrs_.
  
   // We *should* be at the \r in the second CRLF at this point.
   buf_ptr++;  // skip '\r'
   if (--n == 0) {
     msg_hdrs_.clear();
-    return 0;  // not enough data yet
+    return false;  // not enough data yet
   }
-
   if (*buf_ptr != '\n') {
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseResponseHdr(): TODO(aka) "
                "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
     msg_hdrs_.clear();
-    return 0;
+    return false;
   }
+  buf_ptr++;  // skip '\n'
+  if (--n == 0)
+    return false;  // not enough data yet
 
-  // Not necessary to increment buf_ptr here.
-  n--;  // skip *expected* '\n'
-
-  // Okay, end of header, all done.
+  // End of message header.
   msg_type_ = HTTPFraming::RESPONSE;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseResponseHdr(): buf[%ld]: %s.",
-          (len - n), buf_ptr);
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
+          "status code %d, buf[%ld]: %s.",
+          status_code_, (len - n), buf_ptr);
 #endif
-  return (len - n);  // amount of data used in buf
+
+  // Okay, RFC 2616 says that the server does *not* need to use
+  // 'Content-length' to signify additional data *if*
+  // 'Transfer-Encoding' is set to chunked.  Unfortunately, the rest
+  // of the this library uses 'Content-Length' to know when we have a
+  // complete message.  Thus, if *chunked* is set, we need to keep
+  // reading *now* to process the chunks.
+
+  static const char* kMimeChunked = MIME_CHUNKED;
+  if (strlen(kMimeChunked) == strlen(transfer_encoding().c_str()) &&
+      !strncasecmp(kMimeChunked, transfer_encoding().c_str(), 
+                   strlen(kMimeChunked))) {
+    // Great, there's a chunked message-body, joy.
+    size_t chunked_bytes_used = 0;
+    if (!ParseChunkedMsgBody(buf_ptr, len - n, &chunked_bytes_used,
+                             chunked_msg_body, chunked_msg_body_size)) {
+      if (error.Event())
+        error.AppendMsg("HTTPFraming::ParseResponseHdr(): ");
+
+      msg_hdrs_.clear();
+      return false;  // either not enough data or we encountered an error
+    }
+
+    n -= chunked_bytes_used;
+  }
+
+  *bytes_used = len - n;  // amount of data we used in buf
+
+  return true;
 }
 
 // Routine to process one "field" within the *message headers*
@@ -1099,7 +1173,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   size_t n = len;  // set aside byte cnt
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): buf[%ld]: %s.",
           (len - n), buf);
 #endif
 
@@ -1128,7 +1202,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   tmp_msg_hdr.field_name = scratch_buffer;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): name %s, buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): name %s, buf[%ld]: %s.",
           tmp_msg_hdr.field_name.c_str(), (len - n), buf_ptr);
 #endif
 
@@ -1156,7 +1230,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   tmp_msg_hdr.field_value = scratch_buffer;
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): value %s, buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): value %s, buf[%ld]: %s.",
           tmp_msg_hdr.field_value.c_str(), (len - n), buf_ptr);
 #endif
 
@@ -1190,7 +1264,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
     tmp_param.key = scratch_buffer;
 
 #if DEBUG_PARSE
-    _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): key %s, buf[%ld]: %s.",
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): key %s, buf[%ld]: %s.",
             tmp_param.key.c_str(), (len - n), buf_ptr);
 #endif
 
@@ -1217,7 +1291,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
     tmp_param.value = scratch_buffer;
 
 #if DEBUG_PARSE
-    _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): value %s, buf[%ld]: %s.",
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): value %s, buf[%ld]: %s.",
             tmp_param.value.c_str(), (len - n), buf_ptr);
 #endif
 
@@ -1245,7 +1319,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   n--;  // skip *expected* '\n'
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NORMAL, "HTTPFraming::ParseMsgHdr(): END buf[%ld]: %s.",
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): END buf[%ld]: %s.",
           (len - n), buf_ptr);
 #endif
 
@@ -1286,6 +1360,148 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   return (len - n);
 }
 
+// Routine to slurp in a *chunked* message-body.
+bool HTTPFraming::ParseChunkedMsgBody(const char* buf, const size_t len,
+                                      size_t* bytes_used, char** msg_body,
+                                      size_t* msg_body_size) const {
+  *bytes_used = 0;
+  if (buf == NULL || *msg_body == NULL) {
+    error.Init(EX_SOFTWARE, "HTTPFraming::ParseChunkedMsgBody(): TODO(aka) "
+               "buf or our msg_body buffer is NULL");
+    return false;
+  }
+
+  // RFC 2616 defines a chunked msg-body as such:
+  //
+  //       Chunked-Body   = *chunk
+  //                        last-chunk
+  //                        trailer
+  //                        CRLF
+  //
+  //       chunk          = chunk-size [ chunk-extension ] CRLF
+  //                        chunk-data CRLF
+  //       chunk-size     = 1*HEX
+  //       last-chunk     = 1*("0") [ chunk-extension ] CRLF
+  //
+  //       chunk-extension= *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
+  //       chunk-ext-name = token
+  //       chunk-ext-val  = token | quoted-string
+  //       chunk-data     = chunk-size(OCTET)
+  //       trailer        = *(entity-header CRLF)
+
+  char scratch_buffer[SCRATCH_BUF_SIZE];
+  size_t n = len;  // set aside byte cnt of buf
+  size_t msg_body_cnt = 0;  // end (or count) of data in msg_body
+
+#if DEBUG_PARSE
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseChunkedMsgBody(): "
+          "On enter, buf[%ld]: %s.", n, buf);
+#endif
+
+  const char* buf_ptr = buf;  // setup a walk pointer
+  while (n > 0 && isspace(*buf_ptr)) {
+    buf_ptr++;	// skip leading whitespace
+    n--;
+  }
+
+  // Loop over each chunk of data ...
+  while (n > 0) {
+    // Get the chunk size.
+    char* scratch_ptr = &scratch_buffer[0];
+    while (n > 0 && *buf_ptr != '\r') {
+      *scratch_ptr++ = *buf_ptr++;
+      n--;
+    }
+    if (n == 0) {
+      return false;  // not enough data yet
+    }
+    *scratch_ptr = '\0';  // null terminate size
+    long chunk_size = strtol(scratch_buffer, (char**)NULL, 16);
+
+    // We should be sitting on CRLF, so skip over them.
+    if (*buf_ptr != '\r') {
+      error.Init(EX_SOFTWARE, "HTTPFraming::ParseChunkedMsgBody(): TODO(aka) "
+                 "expected '\r', got: %s at cnt: %ld", buf_ptr, (len - n));
+      return false;
+    }
+    buf_ptr++;  // skip '\r'
+    if (--n == 0) {
+      return false;  // not enough data yet
+    }
+    if (*buf_ptr != '\n') {
+      error.Init(EX_SOFTWARE, "HTTPFraming::ParseChunkedMsgBody(): TODO(aka) "
+                 "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
+      return false;
+    }
+    buf_ptr++;  // skip '\n'
+    if (--n == 0) {
+      return false;  // not enough data yet
+    }
+
+#if DEBUG_PARSE
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseChunkedMsgBody(): "
+            "chunk size: %ld, buf[%ld]: %s.",
+            chunk_size, (len - n), buf_ptr);
+#endif
+
+    // If chunk-size == 0, we're all done.
+    if (chunk_size == 0) {
+      *bytes_used = n;  // report how much of buf we used
+      *(*msg_body + msg_body_cnt) = '\0';
+      return true;
+    }
+
+    // Make sure we have enough room in our passed in storage.
+    if (chunk_size + msg_body_cnt >= *msg_body_size) {
+      // Need to realloc.
+      size_t new_size = (SCRATCH_BUF_SIZE > chunk_size) ?
+          (*msg_body_size + SCRATCH_BUF_SIZE) :
+          (*msg_body_size + chunk_size + 1);
+      if ((*msg_body = (char*)realloc(*msg_body, new_size)) == NULL) {
+        error.Init(EX_OSERR,  "HTTPFraming::ParseChunkedMsgBody(): "
+                   "realloc(3) failed for %ulb", new_size);
+        return false;
+      }
+
+      *msg_body_size = new_size;
+    }
+
+    // We slurp up data and put in our passed in storage.
+    while (n > 0 && *buf_ptr != '\r') {
+      *(*msg_body + msg_body_cnt++) = *buf_ptr++;
+      n--;
+    }
+    if (n == 0) {
+      return false;  // not enough data yet
+    }
+
+    // We should be sitting on CRLF, so skip over them.
+    if (*buf_ptr != '\r') {
+      error.Init(EX_SOFTWARE, "HTTPFraming::ParseChunkedMsgBody(): TODO(aka) "
+                 "expected '\r', got: %s at cnt: %ld", buf_ptr, (len - n));
+      return false;
+    }
+    buf_ptr++;  // skip '\r'
+    if (--n == 0) {
+      return false;  // not enough data yet
+    }
+    if (*buf_ptr != '\n') {
+      error.Init(EX_SOFTWARE, "HTTPFraming::ParseChunkedMsgBody(): TODO(aka) "
+                 "expected '\n', got: %s at cnt: %ld", buf_ptr, (len - n));
+      return false;
+    }
+    buf_ptr++;  // skip '\n'
+
+#if DEBUG_PARSE
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseChunkedMsgBody(): "
+            "chunk size: %ld, buf[%ld]: %s.",
+            chunk_size, (len - n), buf_ptr);
+#endif
+  }
+
+  // Shouldn't reach!
+  return false;
+}
 
 // Routine to report if the REQUEST is for a WSDL service.
 bool HTTPFraming::IsWSDLRequest(void) const {

@@ -2,6 +2,12 @@
 
 // Copyright (c) 2010, see the file "COPYRIGHT.h" for any restrictions.
 
+#if defined(__linux__)
+#include <linux/limits.h>	// for PATH_MAX
+#else
+#include <sys/syslimits.h>	// for PATH_MAX
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +20,12 @@
 #define DEBUG_PARSE 0
 
 #define SCRATCH_BUF_SIZE (1024 * 4)
+
+// RFC 3986 query delimiters.
+static const char kQueryStart = '?';
+static const char kKeyValueDelimiter = '=';
+static const char kQueryDelimiter = '&';
+static const char kFragmentStart = '#';
 
 // static URL* null_url_non_const = NULL;	// leave in to remember how
 
@@ -95,33 +107,48 @@ void URL::set_port(const in_port_t port) {
   port_ = port;
 }
 
-void URL::set_path(const char* path) {
-  if (path == NULL)
+void URL::set_path(const char* path_buf, const size_t len) {
+  if (path_buf == NULL || len <= 0)
     return;
 
-  if (!is_str_tainted(path))
-    path_ = path;
-  else
+  if (is_str_tainted(path_buf)) {
     path_ = kStringTainted;
+    return;
+  }
+
+  // Grab the path, character by character ...
+  char tmp_buf[PATH_MAX + 1];
+  char* buf_ptr = &tmp_buf[0];
+  size_t i = 0;
+  while (i++ < len && *path_buf != '\0' &&
+         *path_buf != kQueryStart && *path_buf != kFragmentStart)
+    *buf_ptr++ = *path_buf++;
+  buf_ptr = '\0';  // null-terminate tmp_buf
+  path_ = tmp_buf;
+
+    // Now, see if we had a query or a fragment ...
+  if (*path_buf == kQueryStart)
+    set_query(path_buf, len - i);
+  else if (*path_buf == kFragmentStart)
+    set_fragment(path_buf);  // set_fragment() does not use len yet
 }
 
 void URL::set_query(const char* query_buf, const size_t len) {
   if (query_buf == NULL)
     return;  // nothing to do
 
+  // TODO(aka) Would be nice to look for fragments in here too!
+
   // TODO(aka) Change routine to use len, as opposed to relying on null
   // termination.
 
   if (query_buf[len] != '\0' || len > 1024) {
-    error.Init(EX_SOFTWARE, "URL::set_query(): buf is not null terminated or too large");
+    error.Init(EX_SOFTWARE, "URL::set_query(): "
+               "buf is not null terminated or too large");
     return;
   }
 
   char scratch_buf[1024];
-
-  // RFC 3986 query delimiters.
-  char key_value_delimiter = '=';
-  char query_delimiter = '&';
 
   const char* buf_ptr = query_buf;
   struct url_query_info tmp_info;
@@ -130,14 +157,15 @@ void URL::set_query(const char* query_buf, const size_t len) {
   while (n > 0) {
     // Look for delimiter ...
     char* ptr = &scratch_buf[0];
-    while (n > 0 && *buf_ptr != key_value_delimiter && !isspace(*buf_ptr)) {
+    while (n > 0 && *buf_ptr != kKeyValueDelimiter && !isspace(*buf_ptr)) {
       *ptr++ = *buf_ptr++;
       n--;
     }
 
-    if (*buf_ptr != key_value_delimiter) {
-      error.Init(EX_SOFTWARE, "URL::set_query(): buf (%s) does not have a \'%c\'", 
-                 query_buf, key_value_delimiter);
+    if (*buf_ptr != kKeyValueDelimiter) {
+      error.Init(EX_SOFTWARE, "URL::set_query(): "
+                 "buf (%s) does not have a \'%c\'", 
+                 query_buf, kKeyValueDelimiter);
       return;
     }
 
@@ -149,7 +177,7 @@ void URL::set_query(const char* query_buf, const size_t len) {
     
     // Find end of value.
     ptr = &scratch_buf[0];
-    while (n > 0 && *buf_ptr != query_delimiter && !isspace(*buf_ptr)) {
+    while (n > 0 && *buf_ptr != kQueryDelimiter && !isspace(*buf_ptr)) {
       *ptr++ = *buf_ptr++;
       n--;
     }
@@ -158,7 +186,7 @@ void URL::set_query(const char* query_buf, const size_t len) {
     tmp_info.value = scratch_buf;
     query_.push_back(tmp_info);  // add new key/value pair to our list of queries
 
-    if (*buf_ptr == query_delimiter) {
+    if (*buf_ptr == kQueryDelimiter) {
       buf_ptr++;  // move past query delimiter
       n--;
     }
@@ -267,11 +295,16 @@ const char* URL::print_xmlt(const int indent_level, const char* element,
 #endif
 
 void URL::Init(const char* scheme, const char* host, const in_port_t port, 
-               const char* query, const size_t len, const char* fragment) {
+               const char* path_buf, const size_t path_len,
+               const char* query_buf, const size_t query_len,
+               const char* fragment) {
   set_scheme(scheme);
   set_host(host);
   set_port(port);
-  set_query(query, len);
+  if (path_len)
+    set_path(path_buf, path_len);
+  if (query_len)
+    set_query(query_buf, query_len);
   set_fragment(fragment);
   if (error.Event())
     error.AppendMsg("URL::Init(): ");
@@ -398,12 +431,13 @@ size_t URL::InitFromBuf(const char* buf, const size_t len,
     if (--n == 0)
       return 0;  // not enough data yet (we continued process with '/')
     char* ptr = &scratch_buffer[0];
-    while (n > 0 && *buf_ptr != '?' && *buf_ptr != '#' && !isspace(*buf_ptr)) {  // query & frags
+    while (n > 0 && *buf_ptr != kQueryStart &&
+           *buf_ptr != kFragmentStart && !isspace(*buf_ptr)) {  // query & frags
       *ptr++ = *buf_ptr++;
       n--;
     }
     *ptr = '\0';  // null terminate the path
-    set_path(scratch_buffer);
+    set_path(scratch_buffer, strlen(scratch_buffer));
   }
 
 #if DEBUG_PARSE
@@ -412,13 +446,14 @@ size_t URL::InitFromBuf(const char* buf, const size_t len,
 #endif
 
   // See if we have a query.
-  if (n > 0 && *buf_ptr == '?') {
+  if (n > 0 && *buf_ptr == kQueryStart) {
     // We have a query, so get it.
     buf_ptr++;	// skip over "?"
     if (--n == 0)
       return 0;  // not enough data yet (we continued process with '?')
     char* ptr = &scratch_buffer[0];
-    while (n > 0 && *buf_ptr != '#' && !isspace(*buf_ptr)) {  // until we reach a fragment
+    while (n > 0 && *buf_ptr != kFragmentStart &&
+           !isspace(*buf_ptr)) {  // until we reach a fragment
       *ptr++ = *buf_ptr++;
       n--;
     }
@@ -432,7 +467,7 @@ size_t URL::InitFromBuf(const char* buf, const size_t len,
 #endif
 
   // Finally, see if we have a fragment.
-  if (n > 0 && *buf_ptr == '#') {
+  if (n > 0 && *buf_ptr == kFragmentStart) {
     // We have a fragment, so get it.
     buf_ptr++;	// skip over "#"
     if (--n == 0)

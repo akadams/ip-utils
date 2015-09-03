@@ -30,6 +30,12 @@ using namespace std;
 #define MIME_CONTENT_LENGTH "Content-Length"
 #define MIME_CONTENT_ENCODING "Content-Encoding"
 #define MIME_CONTENT_TYPE "Content-Type"
+#define MIME_TRANSFER_ENCODING "Transfer-Encoding"
+#define MIME_HOST "Host"
+#define MIME_ACCEPT "Accept"
+
+// Message-header "Transfer-Encoding" field values and parameters.
+#define MIME_CHUNKED "chunked"
 
 // Message-header "Content-Type" field values and parameters.
 

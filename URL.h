@@ -79,7 +79,7 @@ class URL {
   void set_scheme(const char* scheme);
   void set_host(const char* host);
   void set_port(const in_port_t port);
-  void set_path(const char* path);
+  void set_path(const char* path_buf, const size_t len);
   void set_query(const char* query_buf, const size_t len);
   void set_fragment(const char* fragment);
   void clear(void);
@@ -105,7 +105,9 @@ class URL {
    *  @see ErrorHandler Class
    */
   void Init(const char* scheme, const char* host, const in_port_t port, 
-            const char* query, const size_t len, const char* fragment);
+            const char* path_buf, const size_t path_len, 
+            const char* query_buf, const size_t query_len, 
+            const char* fragment);
 
   /** Routine to create (or initialize) an URL object from a char buffer.
    *

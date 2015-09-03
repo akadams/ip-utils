@@ -192,7 +192,7 @@ class SSLConn : public TCPConn {
    *  @see ErrorHandler
    *  @return a SSLConn that holds the new socket
    */
-  SSLConn Accept(void) const;
+  SSLConn Accept(SSLContext* ctx) const;
 
   /** Routine to gracefully close an SSL connection.
    *

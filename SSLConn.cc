@@ -19,7 +19,7 @@
 #define SCRATCH_BUF_SIZE (1024 * 4)
 
 #define DEBUG_CLASS 0
-
+#define DEBUG_INCOMING_DATA 0
 
 // Non-class specific utility functions.
 
@@ -178,7 +178,7 @@ void SSLConn::Socket(const int domain, const int type, const int protocol, SSLCo
   // we reference count via the Descriptor ojbect).
 
   // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
-  if ((ssl_ = SSL_new(ctx->ctx())) == NULL) {
+  if ((ssl_ = SSL_new(ctx->ctx_)) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Socket(): SSL_new(3) failed: %s", ssl_err_str().c_str());
     return;
   }
@@ -383,7 +383,7 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
   // TCP file descriptor to it.
 
   // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
-  if ((peer->ssl_ = SSL_new(ctx->ctx())) == NULL) {
+  if ((peer->ssl_ = SSL_new(ctx->ctx_)) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_new(3) failed: %s", ssl_err_str().c_str());
     return;
   }
@@ -546,11 +546,11 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
 // provides the peer's SSLConn object.
 //
 // Note, this routine can set an ErrorHandler event.
-SSLConn SSLConn::Accept(void) const {
+SSLConn SSLConn::Accept(SSLContext* ctx) const {
   SSLConn peer;  // XXX TODO(aka) We need framing type here!
 
   // Call SSLConn::Accept(SSLConn*) to get the work done.
-  Accept(&peer);
+  Accept(&peer, ctx);
 
   return peer;
 }
@@ -858,7 +858,7 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 #if 0  // XXX
   // Out of curiosity, see if we have any data pending in SSL.
   if (! (bytes_left = SSL_pending(ssl))) {
-    logger.Log(LOG_DEBUGGING, "No SSL data pending, requesting via SSL_read(3).");
+    _LOGGER(LOG_DEBUG, "No SSL data pending, requesting via SSL_read(3).");
   }
 #endif
 
@@ -879,6 +879,12 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 
   *eof = false;
   int bytes_read = SSL_read(ssl_, buf, buf_len);
+
+#if DEBUG_INCOMING_DATA
+  _LOGGER(LOG_NOTICE, "DEBUG: SSLConn::Read(): SSL_read() returned %db.", 
+          bytes_read);
+#endif
+
   if (bytes_read == 0) {
     // From SSL_read(3): The read operation was not successful. The
     // reason may either be a clean shutdown due to a "close notify"
@@ -893,7 +899,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
     // Check for an ERROR condition ...
     switch(SSL_get_error(ssl_, bytes_read)) {
       case SSL_ERROR_ZERO_RETURN :
-        _LOGGER(LOG_INFO, "SSLConn::Read(): Received \'close notify\' from %s on %d.", 
+        _LOGGER(LOG_INFO, "SSLConn::Read(): "
+                "Received \'close notify\' from %s on %d.", 
                 hostname().c_str(), fd());
         Shutdown(0);  // send our close_notify
         break;
@@ -910,7 +917,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 
         if (!ERR_peek_error()) {
           *eof = true;  // we got EOF
-          _LOGGER(LOG_WARNING, "SSLConn::Read(): Received EOF from %s.", hostname().c_str());
+          _LOGGER(LOG_WARNING, "SSLConn::Read(): Received EOF from %s.",
+                  hostname().c_str());
           SSL_set_shutdown(ssl_, SSL_SENT_SHUTDOWN);  // mark the SSL connection as closed
         } else {
           error.Init(EX_SOFTWARE, "SSLConn::Read(): Received SSL_ERROR_SYSCALL: "
@@ -922,7 +930,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 
       case SSL_ERROR_SSL :
         _LOGGER(LOG_WARNING, "SSLConn::Read(): Received SSL_ERROR_SSL: "
-                "%s terminated connection: %s", hostname().c_str(), ssl_err_str().c_str());
+                "%s terminated connection: %s",
+                hostname().c_str(), ssl_err_str().c_str());
         break;
 
       default:
@@ -947,17 +956,20 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
         if (IsBlocking()) {
           // See SSL_MODE_AUTO_RETRY in SSL_CTX_set_mode(3) for suggestions.
           _LOGGER(LOG_WARNING, "SSLConn::Read(): received SSL_ERROR_WANT_READ "
-                  "on blocking connection to %s (fd %d)", hostname().c_str(), fd());
+                  "on blocking connection to %s (fd %d)",
+                  hostname().c_str(), fd());
         } else {
           _LOGGER(LOG_INFO, "SSLConn::Read(): received SSL_ERROR_WANT_READ "
-                  "on non-blocking connection to %s on fd %d.", hostname().c_str(), fd());
+                  "on non-blocking connection to %s on fd %d.",
+                  hostname().c_str(), fd());
         }
         break;
 
       case SSL_ERROR_WANT_WRITE :
         if (IsBlocking()) {
           error.Init(EX_SOFTWARE, "SSLConn::Read(): SSL_ERROR_WANT_WRITE: "
-                     "on blocking connection to %s on fd %d", hostname().c_str(), fd());
+                     "on blocking connection to %s on fd %d",
+                     hostname().c_str(), fd());
           return bytes_read;
         } else {
           // See SSL_MODE_AUTO_RETRY in SSL_CTX_set_mode(3) for suggestions.
@@ -977,7 +989,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 
         if (!ERR_peek_error()) {
           error.Init(EX_SOFTWARE, "SSLConn::Read(): SSL_ERROR_SYSCALL: "
-                     "I/O error with %s on fd %d: %s", hostname().c_str(), fd(), strerror(errno));
+                     "I/O error with %s on fd %d: %s",
+                     hostname().c_str(), fd(), strerror(errno));
           return bytes_read;
         } else {
           error.Init(EX_SOFTWARE, "SSLConn::Read(): SSL_ERROR_SYSCALL: %s: %s", 
@@ -997,11 +1010,11 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
       default:
         {
           if (IsBlocking())
-            error.Init(EX_SOFTWARE, "SSLConn::Read(): unknown blocking ERROR: %s",
-                       ssl_err_str().c_str());
+            error.Init(EX_SOFTWARE, "SSLConn::Read(): "
+                       "unknown blocking ERROR: %s", ssl_err_str().c_str());
           else
-            error.Init(EX_SOFTWARE, "SSLConn::Read(): unknown non-blocking ERROR: %s",
-                       ssl_err_str().c_str());
+            error.Init(EX_SOFTWARE, "SSLConn::Read(): "
+                       "unknown non-blocking ERROR: %s", ssl_err_str().c_str());
           return bytes_read;
         }
     }  // switch(SSL_get_error(ssl_, ret)) {
@@ -1013,17 +1026,18 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 #endif
 
   if (*eof)
-    _LOGGER(LOG_DEBUGGING, "SSLConn::Read(): Read EOF from: %s.", print().c_str());
+    _LOGGER(LOG_DEBUG, "SSLConn::Read(): Read EOF from: %s.", print().c_str());
 
   if (bytes_read) {
-    _LOGGER(LOG_DEBUGGING, "SSLConn::Read(): Read %d byte(s) from: %s.", 
+    _LOGGER(LOG_DEBUG, "SSLConn::Read(): Read %d byte(s) from: %s.", 
             bytes_read, print().c_str());
   }
 
   return bytes_read;
 }
 
-#if 0
+#if 0  // TODO(aka) The following two calls are deprecated.
+
 // This routine calls read(2) on an ready socket, until it either
 // returns with an ERROR or EOF.
 //
@@ -1127,7 +1141,7 @@ ssize_t SSLConn::ReadLine(const char delimiter, const ssize_t buf_len,
 		int ssl_buf_size = SSL_pending(ssl);	// get record size
 
 		if (ssl_buf_size > (int) (str.Buf_Size() - offset)) {
-			logger.Log(LOG_DEBUGGING, "Read_Record(): pending = %d, current = %d, offset = %d, resizing buffer to %d.", ssl_buf_size, str.Buf_Size(), offset, str.Buf_Size() + ((size_t) ssl_buf_size - (str.Buf_Size() - offset)) + 1);
+                  logger.Log(LOG_DEBUGGING, "Read_Record(): pending = %d, current = %d, offset = %d, resizing buffer to %d.", ssl_buf_size, str.Buf_Size(), offset, str.Buf_Size() + ((size_t) ssl_buf_size - (str.Buf_Size() - offset)) + 1);
 
 			str.Resize(str.Buf_Size() + ((size_t) ssl_buf_size - 
 						     (str.Buf_Size() - offset))

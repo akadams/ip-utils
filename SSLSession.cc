@@ -14,7 +14,7 @@
 #include "SSLSession.h"
 
 #define DEBUG_CLASS 0
-#define DEBUG_INCOMING_DATA 0
+#define DEBUG_INCOMING_DATA 1
 #define DEBUG_OUTGOING_DATA 0
 #define DEBUG_MUTEX_LOCK 0
 
@@ -348,11 +348,25 @@ bool SSLSession::InitIncomingMsg(void) {
 #endif
   pthread_mutex_lock(&incoming_mtx);
 
-  if (!rhdr_.InitFromBuf(rbuf_, rbuf_len_)) {
+  // Set aside space in case our incoming message-body is chunked.
+  char* chunked_msg_body = NULL;
+  size_t chunked_msg_body_size = kDefaultBufSize;
+  if ((chunked_msg_body = (char*)calloc(chunked_msg_body_size, 1)) == NULL) {
+    error.Init(EX_OSERR, "SSLSession::InitIncomingMsg(): "
+               "calloc(3) failed for size %ulb", chunked_msg_body_size);
+    return false;
+  }
+
+  size_t bytes_used = 0;  // amount of data used from rbuf_ to build header
+  if (!rhdr_.InitFromBuf(rbuf_, rbuf_len_, &bytes_used,
+                         &chunked_msg_body, &chunked_msg_body_size)) {
     if (error.Event()) {
       error.AppendMsg("SSLSession::InitIncomingMsg(): ");
       ResetRbuf();
     }
+
+    if (chunked_msg_body != NULL)
+      free(chunked_msg_body);
 
 #if DEBUG_MUTEX_LOCK
     warnx("SSLSession::InitIncomingMsg(): releasing incoming lock.");
@@ -362,9 +376,41 @@ bool SSLSession::InitIncomingMsg(void) {
   }
 
   // If we made it here, we parsed the framing header, so remove the
-  // framing header from our buffer.
+  // framing header from our buffer.  First, check the null-terminated
+  // chunked_msg_body to see if we were forced to slurp up the
+  // message-body during our header parse.
 
-  ShiftRbuf(rhdr_.hdr_len(), 0);
+  size_t chunked_msg_body_len = strlen(chunked_msg_body);
+  if (chunked_msg_body_len > 0) {
+    // Copy our chunked messsage-body back into our rbuf_.  Yes, I
+    // know this is an additional copy (and arguably a HACK), but the
+    // rest of the SSLSession library wants to operate on rbuf_ using
+    // body_len in MsgHdr (MsgInfo).
+  
+    _LOGGER(LOG_INFO, "SSLSession::InitIncomingMsg(): "
+            "Moving chunked data back to rbuf_: "
+            "chunked msg-body (%ld), bytes_used (%ld), rbuf_len (%ld).",
+            chunked_msg_body_len, bytes_used, rbuf_len_);
+
+    memcpy(rbuf_, chunked_msg_body, chunked_msg_body_len);
+
+    // We copied the msg-body back in, now close the gap between the
+    // end of the msg-body and the next message waiting in rbuf_ (if
+    // one exists).
+
+    ShiftRbuf((bytes_used - chunked_msg_body_len), chunked_msg_body_len);
+
+    // Finally, add a Content-Length value to our message-headers
+    // (this will allow the rest of the routines, e.g.,
+    // MsgHdr::body_len(), to behave as if the message wasn't chunked.
+
+    rhdr_.set_body_len(chunked_msg_body_len);
+  } else {
+    ShiftRbuf(bytes_used, 0);
+  }
+
+  if (chunked_msg_body != NULL)
+    free(chunked_msg_body);
 
   // Build our SSLSession meta-data for the incoming message.
   rpending_.initialized = 1;
@@ -578,7 +624,9 @@ ssize_t SSLSession::Read(bool* eof) {
 
 #if DEBUG_INCOMING_DATA
   _LOGGER(LOG_NOTICE, "DEBUG: SSLSession::Read(): "
-          "Entering: rpending msg: %d, %d, %ld, %ld, %ld, %ld.", 
+          "Entering: rbuf: %ld, %ld, eof: %d, "
+          "rpending: %d, %d, %ld, %ld, %ld, %ld.", 
+          rbuf_size_, rbuf_len_, *eof,
           rpending_.storage, rpending_.storage_initialized, 
           rpending_.hdr_len, rpending_.body_len, rpending_.buf_offset,
           rpending_.file_offset);
@@ -627,7 +675,9 @@ ssize_t SSLSession::Read(bool* eof) {
 
 #if DEBUG_INCOMING_DATA
   _LOGGER(LOG_NOTICE, "DEBUG: SSLSession::Read(): "
-          "Leaving: rpending msg: %d, %ld, %ld, %ld, %ld.", 
+          "Leaving: rbuf: %ld, %ld, eof: %d, "
+          "rpending: %d, %ld, %ld, %ld, %ld.", 
+          rbuf_size_, rbuf_len_, *eof, 
           rpending_.storage, rpending_.hdr_len, rpending_.body_len, 
           rpending_.buf_offset, rpending_.file_offset);
 #endif
@@ -1110,6 +1160,18 @@ void SSLSession::PopOutgoingMsgQueue(void) {
 
 // Boolean functions.
 
+#if 0  // Decprecated.
+// Routine to make sure we have all of our message (hdr + body).
+bool SSLSession::IsIncomingMsgComplete(void) const {
+  if (rpending_.initialized == 0)
+    return false;  // need to call InitIncomingMsg()
+
+  if (framing_type_ == MsgHdr::TYPE_BASIC)
+    return ((rpending_.file_offset >= rpending_.body_len) ||
+             (rbuf_len_ >= rpending_.body_len)) ? true : false;
+}
+#endif
+
 // Routine to check if we have any pending outgoing data sitting in
 // this SSLSession.
 bool SSLSession::IsOutgoingDataPending(void) const {
@@ -1132,6 +1194,7 @@ bool SSLSession::IsOutgoingDataPending(void) const {
 
   return data_ready;
 }
+
 
 // Private member functions.
 

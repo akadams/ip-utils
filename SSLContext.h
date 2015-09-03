@@ -49,7 +49,7 @@ class SSLContext {
   // Copy constructor, assignment and equality operator needed for STL.
 
   // Accessors.
-  const SSL_CTX* ctx(void) const { return ctx_; }
+  // XXX const SSL_CTX* ctx(void) const { return ctx_; }
   // XXX const SSL_METHOD* method(void) const { return method_; }
 
   // Mutators.
@@ -102,6 +102,8 @@ class SSLContext {
 #endif
 
   // Flags.
+
+  friend class SSLConn;
 
  protected:
   // Data members.

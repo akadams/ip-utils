@@ -95,6 +95,14 @@ class HTTPFraming {
    */
   string content_type(void) const;
 
+  /** Routine to return the 'Transfer-Encoding' field-value.
+   *
+   *  This is useful, since RESPONSE message (according to RFC 2616)
+   *  don't need to set a 'Content-Length' when including a
+   *  message-body.  Joy.
+   */
+  string transfer_encoding(void) const;
+
   /** Routine to return a specific message-header.
    *
    */
@@ -135,23 +143,26 @@ class HTTPFraming {
    */
   string print_hdr(const int offset) const;
 
-  /** Routine to initalize a HTTPFraming object as a REQUEST message.
+  /** Routine to initalize an HTTPFraming object as a REQUEST message.
    *
    */
   void InitRequest(const int method, const URL& uri);
 
-  /** Routine to initialize a HTTPFraming objecct as a RESPONSE message.
+  /** Routine to initialize an HTTPFraming objecct as a RESPONSE message.
    *
    */
   void InitResponse(const int code, const int connection);
 
-  /** Parse (or initialize) a char* stream into a HTTPFraming object.
+  /** Parse (or initialize) a char* stream into an HTTPFraming object.
    *
    *  This routine takes a pointer to a character stream and attempts
-   *  to parse the stream into a HTTPFraming object.  The amount of
+   *  to parse the stream into an HTTPFraming object.  The amount of
    *  data used to create the HTTPFraming object is returned by the
    *  routine (0 if the routine is unable to *completely* build the
-   *  HTTPFraming object).  
+   *  HTTPFraming object).
+   *
+   *  TOOD(aka) Why do we need a default port?  (I think for URL, but
+   *  not sure.)
    *
    *  This routine will set an ErrorHandler event if it encounters an
    *  unrecoverable error.
@@ -159,10 +170,15 @@ class HTTPFraming {
    *  @see ErrorHandler Class
    *  @param buf a char* stream
    *  @param len a size_t specifying the size of buf
+   *  @param default_port is an in_port_t to act as a default, if none is found
+   *  @param bytes_used a size_t* showing how much data from buf was used
+   *  @param chunked_msg_body a char** to hold the message-body if chunking set
+   *  @param chunked_msg_body_size a size_t* showing current size of chunk buffer
    *  @return a size_t showing how much data from buf was used (or 0)
    */
-  size_t InitFromBuf(const char* buf, const size_t len, 
-                     const in_port_t default_port);
+  bool InitFromBuf(const char* buf, const size_t len, 
+                   const in_port_t default_port, size_t* bytes_used,
+                   char** chunked_msg_body, size_t* chunked_msg_body_size);
 
   /** Routine to append a message-header to the HTTPFraming object.
    *
@@ -186,7 +202,27 @@ class HTTPFraming {
   void AppendMsgHdr(const char* field_name, const char* field_value,
                     const char* key, const char* value);
 
-  /** Routine to parse a char* stream as a HTTPFraming REQUEST header.
+  /** Routine to parse a char* stream as an HTTPFraming REQUEST header.
+   *
+   *  This routine will set an ErrorHandler event if it encounters an
+   *  unrecoverable error.
+   *
+   *  TODO(aka) There seems to be some confusion as to whether the
+   *  Parse* routines should return the amount of data used from the
+   *  const buf, or if they should return a bool showing success or
+   *  not (and setting the amount of data used via a parameter var
+   *  ...).
+   *
+   *  @see ErrorHandler Class
+   *  @param buf a char* stream
+   *  @param len a size_t specifying the size of buf
+   *  @param bytes_used a size_t showing how much data from buf was used (or 0)
+   *  @return a bool showing successful parsing
+   */
+  bool ParseRequestHdr(const char* buf, const size_t len, 
+                       const in_port_t default_port, size_t* bytes_used);
+
+  /** Routine to parse a char* stream as an HTTPFraming RESPONSE header.
    *
    *  This routine will set an ErrorHandler event if it encounters an
    *  unrecoverable error.
@@ -194,24 +230,15 @@ class HTTPFraming {
    *  @see ErrorHandler Class
    *  @param buf a char* stream
    *  @param len a size_t specifying the size of buf
-   *  @return a size_t showing how much data from buf was used (or 0)
+   *  @param bytes_used a size_t showing how much data from buf was used
+   *  @param chunked_msg_body a char** to hold the message-body if chunking set
+   *  @param chunked_msg_body_size a size_t* showing current size of chunk buffer
+   *  @return a bool showing successful parsing
    */
-  size_t ParseRequestHdr(const char* buf, const size_t len, 
-                         const in_port_t default_port);
+  bool ParseResponseHdr(const char* buf, const size_t len, size_t* bytes_used,
+                        char** chunked_msg_body, size_t* chunked_msg_body_size);
 
-  /** Routine to parse a char* stream as a HTTPFraming RESPONSE header.
-   *
-   *  This routine will set an ErrorHandler event if it encounters an
-   *  unrecoverable error.
-   *
-   *  @see ErrorHandler Class
-   *  @param buf a char* stream
-   *  @param len a size_t specifying the size of buf
-   *  @return a size_t showing how much data from buf was used (or 0)
-   */
-  size_t ParseResponseHdr(const char* buf, const size_t len);
-
-  /** Routine to parse a char* stream as a HTTP message-header.
+  /** Routine to parse a char* stream as an HTTP message-header.
    *
    *  This routine will set an ErrorHandler event if it encounters an
    *  unrecoverable error.
@@ -222,6 +249,28 @@ class HTTPFraming {
    *  @return a size_t showing how much data from buf was used (or 0)
    */
   size_t ParseMsgHdr(const char* buf, const size_t len);
+
+  /** Routine to parse a char* stream as an HTTP chunked message-body.
+   *
+   *  Any chunked data found in the message-body will be placed,
+   *  chunk-at-a-time into the passed in msg_body buffer.  Upon
+   *  reading a 0-sized chunk, the msg_body buffer will be
+   *  null-terminated.  Thus, the amount of data within msg_body can
+   *  be determined using strlen().
+   *
+   *  This routine will set an ErrorHandler event if it encounters an
+   *  unrecoverable error.
+   *
+   *  @see ErrorHandler Class
+   *  @param buf a char* stream
+   *  @param len a size_t specifying the size of buf
+   *  @param bytes_used a size_t showing how much data from buf was used (or 0)
+   *  @param msg_body a char** to a buffer to hold the de-chunked msg_body
+   *  @param msg_body_len a size_t* that reports the current size of above buffer
+   *  @return
+   */
+  bool ParseChunkedMsgBody(const char* buf, const size_t len, size_t* bytes_used,
+                           char** msg_body, size_t* msg_body_len) const;
 
   // Boolean checks.
   bool IsWSDLRequest(void) const;

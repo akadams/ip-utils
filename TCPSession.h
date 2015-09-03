@@ -203,13 +203,14 @@ class TCPSession : public TCPConn {
 
   // Boolean checks.
   bool IsSynchroniationEnabled(void) const { return synchronize_connection_; }
-  bool IsIncomingDataInitialized(void) const {
+  bool IsIncomingMsgInitialized(void) const {
     return (rpending_.initialized == 1) ? true : false; }
   bool IsIncomingStorageInitialized(void) const { 
     return rpending_.storage_initialized; }
   bool IsIncomingDataStreaming(void) const { 
     return (rpending_.storage == SESSION_USE_DISC) ? true : false; }
   bool IsIncomingMsgComplete(void) const {
+    err(EX_SOFTWARE, "IsOutgoingMsgComplete() broken, see SSLSession!\n");
     return ((rpending_.initialized == 1) && 
             ((rpending_.file_offset >= 
               rpending_.body_len) ||

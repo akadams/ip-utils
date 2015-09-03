@@ -276,6 +276,23 @@ void MsgHdr::set_hdr(const HdrStorage& hdr) {
   hdr_ = hdr;
 }
 
+void MsgHdr::set_body_len(const size_t body_len) {
+  switch (type_) {
+    case TYPE_BASIC :
+      hdr_.basic_.len = body_len;
+      break;
+
+    case TYPE_HTTP :
+      char tmp_buf[64];
+      snprintf((char*)tmp_buf, 64, "%d", (int)body_len);
+      hdr_.http_.AppendMsgHdr(MIME_CONTENT_LENGTH, tmp_buf, NULL, NULL);
+      break;
+
+    default :
+      _LOGGER(LOG_ERR, "MsgHdr::set_body_len(): unknown type: %d", type_);
+  }
+}
+
 void MsgHdr::clear(void) {
   msg_id_ = 0;
   type_ = TYPE_NONE;
@@ -360,7 +377,9 @@ void MsgHdr::Init(const uint16_t msg_id, const struct BasicFramingHdr& hdr) {
 // Routine to initialize a MsgHdr object from a char buffer.
 //
 // This routine can set an ErrorHandler event.
-size_t MsgHdr::InitFromBuf(const char* buf, const size_t len) {
+bool MsgHdr::InitFromBuf(const char* buf, const size_t len, size_t* bytes_used,
+                         char** chunked_msg_body,
+                         size_t* chunked_msg_body_size) {
   switch (type_) {
     case MsgHdr::TYPE_BASIC :
       // Block protect case statement to make compiler happier.
@@ -375,17 +394,24 @@ size_t MsgHdr::InitFromBuf(const char* buf, const size_t len) {
         // Grab the message-header and set the msg_id from the header.
         memcpy(&hdr_.basic_, &buf, sizeof(hdr_.basic_));
         msg_id_ = hdr_.basic_.msg_id;
+        *bytes_used = sizeof(hdr_.basic_);
       }
       break;
 
     case MsgHdr::TYPE_HTTP :
       // Block protect case statement to make compiler happier.
       {
-        if (hdr_.http_.InitFromBuf(buf, len, IPCOMM_PORT_NULL) == 0) {
+        if (hdr_.http_.InitFromBuf(buf, len, IPCOMM_PORT_NULL, bytes_used,
+                                   chunked_msg_body,
+                                   chunked_msg_body_size) == 0) {
           if (error.Event())
             error.AppendMsg("MsgHdr::InitFromBuf(): ");
           return false;  // not enough data or ErrorHandler event
         }
+
+        // Note, if the message-body was chunked, it's up to the
+        // calling program to *noticed* that chunked_msg_body is
+        // non-empty.
 
         // If we made it here, we parsed the HTTP header, so generate
         // an unique msg_id for the HTTP message.
