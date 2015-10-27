@@ -14,7 +14,7 @@
 #include "SSLSession.h"
 
 #define DEBUG_CLASS 0
-#define DEBUG_INCOMING_DATA 1
+#define DEBUG_INCOMING_DATA 0
 #define DEBUG_OUTGOING_DATA 0
 #define DEBUG_MUTEX_LOCK 0
 

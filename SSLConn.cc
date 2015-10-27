@@ -30,7 +30,6 @@ SSLConn::SSLConn(void) {
   warnx("SSLConn::SSLConn(void) called.");
 #endif
 
-  // XXX ctx_ = NULL;
   ssl_ = NULL;
   peer_certificate_ = NULL;
 }
@@ -51,8 +50,6 @@ SSLConn::~SSLConn(void) {
     ssl_ = NULL;
   }
 
-  // XXX ctx_ = NULL;  // ctx_ object is const, so we can't do anything with it anyways
-  
   // Rest of work is done in IPComm (via TCPConn).
 }
 
@@ -63,7 +60,6 @@ SSLConn::SSLConn(const SSLConn& src)
   warnx("SSLConn::SSLConn(const SSLConn&) called.");
 #endif
 
-  // XXX ctx_ = src.ctx_;
   ssl_ = src.ssl_;  // note, ref count in Descriptor is bumped in IPComm copy constructor
 
   peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
@@ -73,8 +69,6 @@ SSLConn& SSLConn::operator =(const SSLConn& src) {
 #if DEBUG_CLASS
   warnx("SSLConn::operator =(const SSLConn&) called.");
 #endif
-
-  // XXX ctx_ = src.ctx_;
 
   // If we're about to blow away our IPComm -> Descriptor, then we
   // need to blow away our SSL* object before setting it to the new one.
@@ -106,8 +100,6 @@ int SSLConn::operator ==(const SSLConn& other) const {
 
 // Mutators.
 void SSLConn::clear(void) {
-  // XXX ctx_ = NULL;
-
   // If we're about to blow away our IPComm -> Descriptor, then we
   // need to blow away our SSL* object before setting it to the new one.
 
@@ -147,8 +139,6 @@ void SSLConn::Init(const char* host, const int address_family, int retry_cnt) {
     error.AppendMsg("SSLConn::Init(): ");
     return;
   }
-
-  // XXX ctx_ = &ctx;
 }
 
 // Routine to initialize our SSLConn as a server.
@@ -160,14 +150,13 @@ void SSLConn::InitServer(const int address_family) {
     error.AppendMsg("SSLConn::InitServer(): ");
     return;
   }
-
-  // XXX ctx_ = &ctx;
 }
 
 // Routine to open a socket.
 //
 // Note, this routine can set an ErrorHandler event.
-void SSLConn::Socket(const int domain, const int type, const int protocol, SSLContext* ctx) {
+void SSLConn::Socket(const int domain, const int type, const int protocol,
+                     SSLContext* ctx) {
   IPComm::Socket(domain, type, protocol);
   if (error.Event()) {
     error.AppendMsg("SSLConn::Socket(): ");
@@ -177,9 +166,9 @@ void SSLConn::Socket(const int domain, const int type, const int protocol, SSLCo
   // Okay, we now have a file desciptor, so get a SSL* object (which
   // we reference count via the Descriptor ojbect).
 
-  // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
   if ((ssl_ = SSL_new(ctx->ctx_)) == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Socket(): SSL_new(3) failed: %s", ssl_err_str().c_str());
+    error.Init(EX_SOFTWARE, "SSLConn::Socket(): SSL_new(3) failed: %s", 
+               ssl_err_str().c_str());
     return;
   }
 }
@@ -284,20 +273,22 @@ void SSLConn::Connect(void) {
       case SSL_ERROR_WANT_CONNECT :
         if (IsBlocking()) {
           // WTF!?!
-          error.Init(EX_SOFTWARE, "SSLConn::Connect(): SSL_ERROR_WANT_ACCEPT/SSL_ERROR_WANT_CONNECT :"
+          error.Init(EX_SOFTWARE, "SSLConn::Connect(): "
+                     "SSL_ERROR_WANT_ACCEPT/SSL_ERROR_WANT_CONNECT :"
                      "on blocking connection to %s (fd %d)", hostname().c_str(), fd());
           return;
         } else {
-          _LOGGER(LOG_INFO, "SSLConn::Connect(): received SSL_ERROR_WANT_ACCEPT/CONNECT: "
-                  " returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Connect(): "
+                  "Received SSL_ERROR_WANT_ACCEPT/CONNECT: returning.");
           return;
         }
         break;
 
       case SSL_ERROR_WANT_X509_LOOKUP :  // something's up with SSL_CTX_set_client_cert_cb()
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Connect(): SSL_ERROR_WANT_X509_LOOKUP: "
-                     "with host %s (fd %d)", hostname().c_str(), fd());
+          error.Init(EX_SOFTWARE, "SSLConn::Connect(): "
+                     "SSL_ERROR_WANT_X509_LOOKUP: with host %s (fd %d)",
+                     hostname().c_str(), fd());
           return;
         }
         break;
@@ -345,12 +336,15 @@ void SSLConn::Connect(void) {
   if (peer_certificate_ != NULL) {
     char cn[SCRATCH_BUF_SIZE];
     X509_NAME* subject = X509_get_subject_name(peer_certificate_);
-    X509_NAME_get_text_by_NID(subject, NID_commonName, cn, SSL_X509_MAX_FIELD_SIZE - 1);
+    X509_NAME_get_text_by_NID(subject, NID_commonName, cn,
+                              SSL_X509_MAX_FIELD_SIZE - 1);
     _LOGGER(LOG_NOTICE, "SSL (%s) connection to: %s, received cert: %s.", 
-            SSL_CIPHER_get_name(SSL_get_current_cipher(ssl_)), hostname().c_str(), cn);
+            SSL_CIPHER_get_name(SSL_get_current_cipher(ssl_)),
+            hostname().c_str(), cn);
   } else  {
     _LOGGER(LOG_NOTICE, "SSL (%s) connection to: %s.",
-            SSL_CIPHER_get_name(SSL_get_current_cipher(ssl_)), hostname().c_str());
+            SSL_CIPHER_get_name(SSL_get_current_cipher(ssl_)),
+            hostname().c_str());
   }
 }
 
@@ -382,13 +376,14 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
   // we reference count via the Descriptor ojbect), then associate our
   // TCP file descriptor to it.
 
-  // XXX SSL_CTX* ctx = const_cast <SSL_CTX*>(ctx_->ctx());  // goddamn SSL_new() does not take a const!
   if ((peer->ssl_ = SSL_new(ctx->ctx_)) == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_new(3) failed: %s", ssl_err_str().c_str());
+    error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_new(3) failed: %s",
+               ssl_err_str().c_str());
     return;
   }
   if (!SSL_set_fd(peer->ssl_, peer->fd())) {
-    error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_set_fd(3) failed: %s", ssl_err_str().c_str());
+    error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_set_fd(3) failed: %s",
+               ssl_err_str().c_str());
     return;
   }
 
@@ -470,12 +465,14 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
       case SSL_ERROR_WANT_CONNECT :
         if (IsBlocking()) {
           // WTF!?!
-          error.Init(EX_SOFTWARE, "SSLConn::Accept: SSL_ERROR_WANT_ACCEPT/SSL_ERROR_WANT_CONNECT :"
-                     "on blocking connection to %s (fd %d)", peer->hostname().c_str(), fd());
+          error.Init(EX_SOFTWARE, "SSLConn::Accept: "
+                     "SSL_ERROR_WANT_ACCEPT/SSL_ERROR_WANT_CONNECT :"
+                     "on blocking connection to %s (fd %d)",
+                     peer->hostname().c_str(), fd());
           return;
         } else {
-          _LOGGER(LOG_INFO, "SSLConn::Accept: received SSL_ERROR_WANT_ACCEPT/CONNECT: "
-                  " returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Accept: "
+                  "Received SSL_ERROR_WANT_ACCEPT/CONNECT: returning.");
           return;
         }
         break;
@@ -764,21 +761,25 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
         if (IsBlocking()) {
           // See SSL_MODE_AUTO_RETRY in SSL_CTX_set_mode(3) for suggestions.
           _LOGGER(LOG_WARNING, "SSLConn::Write() received SSL_ERROR_WANT_READ "
-                  "on blocking connection to %s (fd %d)", hostname().c_str(), fd());
+                  "on blocking connection to %s (fd %d)",
+                  hostname().c_str(), fd());
         } else {
           _LOGGER(LOG_INFO, "SSLConn::Write() received SSL_ERROR_WANT_READ "
-                  "on non-blocking connection to %s on fd %d.", hostname().c_str(), fd());
+                  "on non-blocking connection to %s on fd %d.",
+                  hostname().c_str(), fd());
         }
         break;
 
       case SSL_ERROR_WANT_WRITE :
         if (IsBlocking()) {
           error.Init(EX_SOFTWARE, "SSLConn::Write() SSL_ERROR_WANT_WRITE: "
-                     "on blocking connection to %s on fd %d", hostname().c_str(), fd());
+                     "on blocking connection to %s on fd %d",
+                     hostname().c_str(), fd());
           return bytes_wrote;
         } else {
           // See SSL_MODE_AUTO_RETRY in SSL_CTX_set_mode(3) for suggestions.
-          _LOGGER(LOG_INFO, "SSLConn::Write() received SSL_ERROR_WANT_WRITE, returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Write(): "
+                  "Received SSL_ERROR_WANT_WRITE, returning.");
         }
         break;
 
@@ -794,7 +795,8 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
 
         if (!ERR_peek_error()) {
           error.Init(EX_SOFTWARE, "SSLConn::Write() SSL_ERROR_SYSCALL: "
-                     "I/O error with %s on fd %d: %s", hostname().c_str(), fd(), strerror(errno));
+                     "I/O error with %s on fd %d: %s", 
+                     hostname().c_str(), fd(), strerror(errno));
           return bytes_wrote;
         } else {
           error.Init(EX_SOFTWARE, "SSLConn::Write() SSL_ERROR_SYSCALL: %s: %s", 
@@ -973,7 +975,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
           return bytes_read;
         } else {
           // See SSL_MODE_AUTO_RETRY in SSL_CTX_set_mode(3) for suggestions.
-          _LOGGER(LOG_INFO, "SSLConn::Read(): received SSL_ERROR_WANT_WRITE, returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Read(): "
+                  "Received SSL_ERROR_WANT_WRITE, returning.");
         }
         break;
 

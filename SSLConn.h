@@ -76,7 +76,6 @@ class SSLConn : public TCPConn {
   int operator ==(const SSLConn& other) const;
 
   // Accessors.
-  // XXX const SSLContext* ctx(void) const { return ctx_; }
   const SSL* ssl(void) const { return ssl_; }
   const X509* peer_certificate(void) const { return peer_certificate_; }
 
@@ -142,7 +141,8 @@ class SSLConn : public TCPConn {
    *  @param type an int specifying communication semantics
    *  @param protocol an int specifying the communication protocol
    */
-  void Socket(const int domain, const int type, const int protocol, SSLContext* ctx);
+  void Socket(const int domain, const int type, const int protocol,
+              SSLContext* ctx);
 
   /** Routine to issue a connect(2) to the destination within our object.
    *
@@ -305,14 +305,6 @@ class SSLConn : public TCPConn {
 
  protected:
   // Data members.
-
-  // XXX TODO(aka) This should simply be passed in during the Socket
-  // and Accept calls.  It's internally referenced counted, so it
-  // can't even be const.  Besides, there's no reason to have it
-  // anyways!
-
-  // XXX const SSLContext* ctx_;   // pointer to the non-editable OpenSSL *context* that we are using
-
   SSL* ssl_;                // OpenSSL *connection* object.  Note, this
                             // object needs referenced counted,
                             // however, since SSL objects are

@@ -16,7 +16,7 @@ using namespace std;
 #include "HTTPFraming.h"
 
 #define DEBUG_CLASS 0
-#define DEBUG_PARSE 1
+#define DEBUG_PARSE 0
 
 // Non-class specific defines & data structures.
 #define SCRATCH_BUF_SIZE (1024 * 4)  // big enough to hold HTTP header
@@ -476,8 +476,8 @@ void HTTPFraming::InitResponse(const int code, const int connection) {
 }
 
 // Routine to (attempt to) build a HTTPFraming object (basically, the
-// HTTP headers) from a char* buffer (e.g., the data returned from the
-// network ead call).  If we succeed at building the full headers,
+// HTTP headers) from a char* buffer (e.g., the data returned from a
+// network read(3) call).  If we succeed at building the full headers,
 // i.e., we successfully parse up to the CRLFCRLF combo, then we
 // remove the header from rbuf_ and return the boolean TRUE, so that
 // the calling routine can process the message-body remaining in buf.
@@ -515,8 +515,8 @@ bool HTTPFraming::InitFromBuf(const char* buf, const size_t len,
   // data, obviously).
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NOTICE, "HTTPFraming::InitFromBuf(): buf[%ld]: %s.",
-          len - n, buf_ptr);
+  _LOGGER(LOG_NOTICE, "HTTPFraming::InitFromBuf(): "
+          "bytes_used: %ld, buf[%ld]: %s.", *bytes_used, len - n, buf_ptr);
 #endif
 
   if (strlen(buf_ptr) <= strlen(kHTTPSlash))
@@ -533,6 +533,8 @@ bool HTTPFraming::InitFromBuf(const char* buf, const size_t len,
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kMethodPut, buf_ptr, strlen(kMethodPut)) == 0)
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
+  else if (strncasecmp(kMethodDelete, buf_ptr, strlen(kMethodDelete)) == 0)
+    ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
   else if (strncasecmp(kHTTPSlash, buf_ptr, strlen(kHTTPSlash)) == 0) 
     ret_val = ParseResponseHdr(buf_ptr, n, &parse_bytes_used,
                                chunked_msg_body, chunked_msg_body_size);
@@ -545,9 +547,9 @@ bool HTTPFraming::InitFromBuf(const char* buf, const size_t len,
 
 #if DEBUG_PARSE
   _LOGGER(LOG_NOTICE, "HTTPFraming::InitFromBuf(): after parse, "
-          "bytes used: %ld, error flag: %d, buf[%ld]: %s.",
-          *bytes_used, error.Event(), (len - (n + *bytes_used)),
-          buf_ptr + *bytes_used);
+          "ret_val: %d, bytes used: %ld, error flag: %d, buf[%ld]: %s.",
+          ret_val, (len - n) + parse_bytes_used, error.Event(), 
+          (len - ((len - n) + parse_bytes_used)), buf_ptr + parse_bytes_used);
 #endif
 
   if (error.Event()) {
@@ -561,7 +563,7 @@ bool HTTPFraming::InitFromBuf(const char* buf, const size_t len,
   if (!ret_val)
     return false;  // not enough data
 
-  *bytes_used = parse_bytes_used + n;
+  *bytes_used = (len - n) + parse_bytes_used;
 
   // Note, if the message-body was chunked, [SSL|TCP]Session should
   // add the de-chunked body back in rbuf_ and add a Content-Length
@@ -699,6 +701,10 @@ bool HTTPFraming::ParseRequestHdr(const char* buf, const size_t len,
     buf_ptr += strlen(kMethodPost);  // skip over "POST"
     n -= strlen(kMethodPost);
     set_method(POST);
+  } else if (!strncasecmp(kMethodDelete, buf_ptr, strlen(kMethodDelete))) {
+    buf_ptr += strlen(kMethodDelete);  // skip over "DELETE"
+    n -= strlen(kMethodDelete);
+    set_method(DELETE);
   } else {
     // ERROR ...
     error.Init(EX_SOFTWARE, "HTTPFraming::ParseRequestHdr(): "
@@ -1446,7 +1452,7 @@ bool HTTPFraming::ParseChunkedMsgBody(const char* buf, const size_t len,
 
     // If chunk-size == 0, we're all done.
     if (chunk_size == 0) {
-      *bytes_used = n;  // report how much of buf we used
+      *bytes_used = (len - n);  // report how much of buf we used
       *(*msg_body + msg_body_cnt) = '\0';
       return true;
     }

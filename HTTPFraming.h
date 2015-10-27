@@ -287,7 +287,7 @@ class HTTPFraming {
   int msg_type_;	    // NOT_READY | REQUEST | RESPONSE
   int major_;               // major version number
   int minor_;		    // minor version number
-  int method_;		    // GET | HEAD | POST
+  int method_;		    // GET | HEAD | POST | DELETE
   int status_code_;	    // response status code
   URL uri_;		    // URL embedded in start-line of a request
 

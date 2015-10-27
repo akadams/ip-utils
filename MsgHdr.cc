@@ -401,9 +401,9 @@ bool MsgHdr::InitFromBuf(const char* buf, const size_t len, size_t* bytes_used,
     case MsgHdr::TYPE_HTTP :
       // Block protect case statement to make compiler happier.
       {
-        if (hdr_.http_.InitFromBuf(buf, len, IPCOMM_PORT_NULL, bytes_used,
-                                   chunked_msg_body,
-                                   chunked_msg_body_size) == 0) {
+        if (!hdr_.http_.InitFromBuf(buf, len, IPCOMM_PORT_NULL,
+                                    bytes_used, chunked_msg_body,
+                                    chunked_msg_body_size)) {
           if (error.Event())
             error.AppendMsg("MsgHdr::InitFromBuf(): ");
           return false;  // not enough data or ErrorHandler event
