@@ -69,6 +69,7 @@ class SSLContext {
             const int keyfile_type, const char* password, 
             const char* certfile_name, const char* certfile_dir, 
             const int certfile_type,
+            const char* CAfile, const char* CApath,
             const int verify_mode, const int verify_depth,
             const long cache_mode, const long options);
 
@@ -80,10 +81,6 @@ class SSLContext {
 #if 0  // TODO(aka)
   void Load_Cert(const char* sandbox, const char* password,
                  int type = SSL_FILETYPE_PEM)
-  throw (Exception_Handler);
-  void Load_CA_List(const char* sandbox, 
-                    const char* ca_subdir_name,
-                    const char* ca_list_file = NULL)
   throw (Exception_Handler);
 #endif
 

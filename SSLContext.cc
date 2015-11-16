@@ -31,7 +31,8 @@ string ssl_err_str(void) {
 
   unsigned long ssl_error = ERR_get_error();
   while (ssl_error) {
-    ERR_error_string_n(ssl_error, (char*)tmp_str.c_str() + strlen(tmp_str.c_str()),
+    ERR_error_string_n(ssl_error, 
+                       (char*)tmp_str.c_str() + strlen(tmp_str.c_str()),
                        1024 - strlen(tmp_str.c_str()));
     ssl_error = ERR_get_error();
 
@@ -54,7 +55,8 @@ static int pem_passwd_cb(char* buf, int size, int rwflag, void* userdata) {
   strncpy(buf, (char*)userdata, size);
   buf[size - 1] = '\0';	// in-case userdata is > size
 
-  _LOGGER(LOG_DEBUG, "pem_passwd_cb(): received password: %s, with flags: %d.", userdata, rwflag);
+  _LOGGER(LOG_DEBUG, "pem_passwd_cb(): received password: %s, with flags: %d.",
+          userdata, rwflag);
 
   return strlen(buf);
 }
@@ -81,7 +83,7 @@ SSLContext::~SSLContext(void) {
     ctx_ = NULL;
   }
 
-  // XXX method_ = NULL;
+ // XXX method_ = NULL;
 }
 
 // Copy constructor, assignment and equality operator, needed for STL.
@@ -92,18 +94,13 @@ SSLContext::~SSLContext(void) {
 
 // SSLContext manipulation.
 void SSLContext::Init(const SSL_METHOD* method, const char* session_id, 
-                          const char* keyfile_name,  const char* keyfile_dir, 
-                          const int keyfile_type, const char* password, 
-                          const char* certfile_name, const char* certfile_dir, 
-                          const int certfile_type,
-                          const int verify_mode, const int verify_depth, 
-                          const long cache_mode, const long options) {
-  if (keyfile_name == NULL || ! strlen(keyfile_name) || 
-      certfile_name == NULL || ! strlen(certfile_name)) {
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): keyfile or certfile is NULL");
-    return;
-  }
-
+                      const char* keyfile_name,  const char* keyfile_dir, 
+                      const int keyfile_type, const char* password, 
+                      const char* certfile_name, const char* certfile_dir, 
+                      const int certfile_type,
+                      const char* CAfile, const char* CApath,
+                      const int verify_mode, const int verify_depth, 
+                      const long cache_mode, const long options) {
   if (method == NULL) {
     error.Init(EX_SOFTWARE, "SSLContext::Init(): SSL_METHOD* is NULL");
     return;
@@ -126,8 +123,8 @@ void SSLContext::Init(const SSL_METHOD* method, const char* session_id,
   // from a SSL_METHOD* ... might have to query Eric Rescorla on this
   // one.
 
-  _LOGGER(LOG_INFO, "SSLContext::Init(): Started new SSL context with method: %#x.",
-          method->version);
+  _LOGGER(LOG_INFO, "SSLContext::Init(): "
+          "Started new SSL context with method: %#x.", method->version);
 
   // Set how this SSL context will behave.  Choices are:
   //
@@ -142,72 +139,105 @@ void SSLContext::Init(const SSL_METHOD* method, const char* session_id,
   // if a client and server method needs to be explicitly set, we'll
   // wait.
 
-  // Set the unique session id and distinguish this session from other applications.
+  // Set the unique session id and distinguish this session from other
+  // applications.
+
   strncpy(session_id_, session_id, SSL_MAX_SSL_SESSION_ID_LENGTH - 1);
   session_id_[SSL_MAX_SSL_SESSION_ID_LENGTH - 1] = '\0';  // just in-case
-  if (!SSL_CTX_set_session_id_context(ctx_, (unsigned char*)session_id_, strlen(session_id_))) {
+  if (!SSL_CTX_set_session_id_context(ctx_, (unsigned char*)session_id_, 
+                                      strlen(session_id_))) {
     error.Init(EX_SOFTWARE, "SSLContext::Init(): "
-               "SSL_CTX_set_session_id_context() failed: %s", ssl_err_str().c_str());
+               "SSL_CTX_set_session_id_context() failed: %s",
+               ssl_err_str().c_str());
     return;
   }
 
-  // Load in host certificate.  Valid certificate file types are:
-  //
-  // SSL_FILETYPE_PEM
-  // SSL_FILETYPE_ASN1
+  if (certfile_name != NULL && strlen(certfile_name) > 0) {
+    // Load in host certificate.  Valid certificate file types are:
+    //
+    // SSL_FILETYPE_PEM
+    // SSL_FILETYPE_ASN1
+ 
+    File certfile;
+    certfile.Init(certfile_name, certfile_dir);
+    if (!certfile.Exists(NULL)) {
+      error.Init(EX_SOFTWARE, "SSLContext::Init(): "
+                 "certfile: %s, does not exist!", certfile.path(NULL).c_str());
+      return;
+    }
 
-  File keyfile;
-  File certfile;
-  keyfile.Init(keyfile_name, keyfile_dir);
-  certfile.Init(certfile_name, certfile_dir);
-  if (!keyfile.Exists(NULL))
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): keyfile: %s, does not exist!", 
-               keyfile.path(NULL).c_str());
-  if (!certfile.Exists(NULL))
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): certfile: %s, does not exist!", 
-               certfile.path(NULL).c_str());
+    // TODO(aka) According to SSL_CTX_use_certificate(3), we should be
+    // using SSL_CTX_use_certificate_chain_file() here!
 
-  // TODO(aka) According to SSL_CTX_use_certificate(3), we should be
-  // using SSL_CTX_use_certificate_chain_file() here!
+    if (!SSL_CTX_use_certificate_file(ctx_, certfile.path(NULL).c_str(),
+                                      certfile_type)) {
+      error.Init(EX_SOFTWARE, "SSLContext::Init(): "
+                 "SSL_CTX_use_certificate_file() failed: %s",
+                 ssl_err_str().c_str());
+      return;
+    }
 
-  if (!SSL_CTX_use_certificate_file(ctx_, certfile.path(NULL).c_str(), certfile_type))
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): SSL_CTX_use_certificate_file(): "
-               "certificate read failed: %s", ssl_err_str().c_str());
+    // If we also specified a private key to use with our cert, load it.
+    if (keyfile_name != NULL && strlen(keyfile_name) > 0) {
+      File keyfile;
+      keyfile.Init(keyfile_name, keyfile_dir);
+      if (!keyfile.Exists(NULL)) {
+        error.Init(EX_SOFTWARE, "SSLContext::Init(): "
+                   "keyfile: %s, does not exist!", keyfile.path(NULL).c_str());
+        return;
+      }
 
-  // See if the user specified the password already ...
-  if (password != NULL && strlen(password) > 0) {
-    // TODO(aka) What we want is a fuction to reassign the default
-    // callback 'pem_passwd_cb' to another user supplied function!
+      // If the user specified a password, pass it to our callback.
+      if (password != NULL && strlen(password) > 0) {
+        // TODO(aka) What we want is a fuction to reassign the default
+        // callback 'pem_passwd_cb' to another user supplied function!
 
-    _LOGGER(LOG_DEBUG, "SSLContext::Init(): TODO(aka) password callback not impleneted yet!");
+        _LOGGER(LOG_DEBUG, "SSLContext::Init(): TODO(aka) password callback not impleneted yet!");
 
-    // Set callback function to prompt for password & load the one we have.
-    SSL_CTX_set_default_passwd_cb(ctx_, pem_passwd_cb);
-    SSL_CTX_set_default_passwd_cb_userdata(ctx_, (void*)password);
+        // Set callback function to prompt for password & load the one we have.
+        SSL_CTX_set_default_passwd_cb(ctx_, pem_passwd_cb);
+        SSL_CTX_set_default_passwd_cb_userdata(ctx_, (void*)password);
+      }
+
+      // Load key via a STDOUT command prompt.
+
+      // TODO(aka) It would be nice if there was someway that I could tell
+      // when OpenSSL *was* going to prompt for a password ...
+
+      // fprintf(stdout, "%s X.509 passphrase: ", certfile.path(NULL).c_str());
+      fflush(stdout);
+
+      if (!SSL_CTX_use_PrivateKey_file(ctx_, keyfile.path(NULL).c_str(),
+                                       keyfile_type)) {
+        error.Init(EX_SOFTWARE, "SSLContext::Init(): "
+                   "SSL_CTX_use_PrivateKey_file() failed: %s",
+                   ssl_err_str().c_str());
+        return;
+      }
+    
+      // Check the key.
+      if (!SSL_CTX_check_private_key(ctx_)) {
+        error.Init(EX_SOFTWARE, "SSLContext::Init(): "
+                   "SSL_CTX_check_private_key() failed: %s",
+                   ssl_err_str().c_str());
+        return;
+      }
+    }  // if (keyfile_name != NULL && strlen(keyfile_name) > 0) {
+
+    // TODO(aka): Do we need to load a DSA key as well (and a dsa signed cert)?
+
+    _LOGGER(LOG_NOTICE, "Loaded certfile: %s.", certfile.path(NULL).c_str());
+  }  // if (certfile_name != NULL && strlen(certfile_name) > 0) {
+  
+  // If the user gave us a CAfile or CApath, load the CAs.
+  if ((CAfile != NULL && strlen(CAfile)) ||
+      (CApath != NULL && strlen(CApath))) {
+    if (!SSL_CTX_load_verify_locations(ctx_, CAfile, CApath)) {
+      error.Init(EX_SOFTWARE, "SSLContext::SSL_CTX_load_verify_locations(): %s",
+                 ssl_err_str().c_str());
+      return;
+    }
   }
-
-  // Load key via a STDOUT command prompt.
-
-  // TODO(aka) It would be nice if there was someway that I could tell
-  // when OpenSSL *was* going to prompt for a password ...
-
-  // fprintf(stdout, "%s X.509 passphrase: ", certfile.path(NULL).c_str());
-  fflush(stdout);
-
-  if (!SSL_CTX_use_PrivateKey_file(ctx_, keyfile.path(NULL).c_str(), keyfile_type))
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): SSL_CTX_use_PrivateKey_file(): "
-               "private key read failed: %s", ssl_err_str().c_str());
-
-  // Check the key.
-  if (!SSL_CTX_check_private_key(ctx_)) {
-    error.Init(EX_SOFTWARE, "SSLContext::Init(): SSL_CTX_check_private_key(): "
-               "private key check failed: %s", ssl_err_str().c_str());
-    return;
-  }
-
-  // TODO(aka): Do we need to load a DSA key as well (and a dsa signed cert)?
-
-  _LOGGER(LOG_NOTICE, "Loaded certfile: %s.", certfile.path(NULL).c_str());
 
   // Set the maximum number of chained certificates to be used 
   // during the verification process:
