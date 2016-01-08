@@ -19,7 +19,6 @@
 
 #define DEBUG_PARSE 0
 
-#define SCRATCH_BUF_SIZE (1024 * 4)
 
 // RFC 3986 query delimiters.
 static const char kQueryStart = '?';
@@ -121,12 +120,13 @@ void URL::set_path(const char* path_buf, const size_t len) {
   char* buf_ptr = &tmp_buf[0];
   size_t i = 0;
   while (i++ < len && *path_buf != '\0' &&
-         *path_buf != kQueryStart && *path_buf != kFragmentStart)
+         *path_buf != kQueryStart && *path_buf != kFragmentStart) {
     *buf_ptr++ = *path_buf++;
-  buf_ptr = '\0';  // null-terminate tmp_buf
+  }
+  *buf_ptr = '\0';  // null-terminate tmp_buf
   path_ = tmp_buf;
 
-    // Now, see if we had a query or a fragment ...
+  // Now, see if we had a query or a fragment ...
   if (*path_buf == kQueryStart)
     set_query(path_buf, len - i);
   else if (*path_buf == kFragmentStart)
@@ -142,13 +142,13 @@ void URL::set_query(const char* query_buf, const size_t len) {
   // TODO(aka) Change routine to use len, as opposed to relying on null
   // termination.
 
-  if (query_buf[len] != '\0' || len > 1024) {
+  if (query_buf[len] != '\0' || len > kURLMaxSize) {
     error.Init(EX_SOFTWARE, "URL::set_query(): "
                "buf is not null terminated or too large");
     return;
   }
 
-  char scratch_buf[1024];
+  char scratch_buf[kURLMaxSize];
 
   const char* buf_ptr = query_buf;
   struct url_query_info tmp_info;
@@ -219,45 +219,49 @@ void URL::clear(void) {
 
 // Routine to *pretty* print out the URL object.
 string URL::print(void) const {
-  string tmp_str(SCRATCH_BUF_SIZE, '\0');  // '\0' so strlen() works
+  string tmp_str(kURLMaxSize, '\0');  // '\0' so strlen() works
 
   if (scheme_.size() > 0)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "%s://", 
+             kURLMaxSize - strlen(tmp_str.c_str()), "%s://", 
              scheme_.c_str());
 
   if (host_.size() > 0)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "%s", 
+             kURLMaxSize - strlen(tmp_str.c_str()), "%s", 
              host_.c_str());
 
   if (port_ != URL_PORT_NULL)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), ":%hu", 
+             kURLMaxSize - strlen(tmp_str.c_str()), ":%hu", 
              port_);
 
   if (path_.size() > 0)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "/%s", 
+             kURLMaxSize - strlen(tmp_str.c_str()), "/%s", 
              path_.c_str());
 
   if (query_.size()) {
+    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+             kURLMaxSize - strlen(tmp_str.c_str()), "?");
     list<struct url_query_info>::const_iterator itr = query_.begin();
     while (itr != query_.end()) {
       snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-               SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "?%s", 
+               kURLMaxSize - strlen(tmp_str.c_str()), "%s", 
                itr->key.c_str());
 
       snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-               SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "=%s", 
+               kURLMaxSize - strlen(tmp_str.c_str()), "=%s", 
                itr->value.c_str());
-      itr++;
+      if (++itr != query_.end())
+        snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+                 kURLMaxSize - strlen(tmp_str.c_str()), "&");
     }
   }
 
   if (fragment_.size() > 0)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             SCRATCH_BUF_SIZE - strlen(tmp_str.c_str()), "#%s", 
+             kURLMaxSize - strlen(tmp_str.c_str()), "#%s", 
              fragment_.c_str());
 
   return tmp_str;
@@ -269,16 +273,16 @@ const char* URL::print_xmlt(const int indent_level, const char* element,
                             const char* version_attribute) const {
   // Simple generic routine, that doesn't know much about XML!
 
-  static char xml_scratch_buffer[SCRATCH_BUF_SIZE];
+  static char xml_scratch_buffer[kURLMaxSize];
 
-  memset(xml_scratch_buffer, 0, SCRATCH_BUF_SIZE);
+  memset(xml_scratch_buffer, 0, kURLMaxSize);
 
-  for (int i = 0; i < indent_level && i < SCRATCH_BUF_SIZE; i++)
+  for (int i = 0; i < indent_level && i < kURLMaxSize; i++)
     strncat(xml_scratch_buffer, "\t", 1);
 
   if (version_attribute)
     snprintf(xml_scratch_buffer + strlen(xml_scratch_buffer), 
-             SCRATCH_BUF_SIZE - strlen(xml_scratch_buffer),
+             kURLMaxSize - strlen(xml_scratch_buffer),
              "<%s %s = \'%d.%d\'>%s</%s>",
              element, version_attribute, 
              URL_VERSION_MAJOR, 
@@ -286,7 +290,7 @@ const char* URL::print_xmlt(const int indent_level, const char* element,
              Print(), element);
   else
     snprintf(xml_scratch_buffer + strlen(xml_scratch_buffer), 
-             SCRATCH_BUF_SIZE - strlen(xml_scratch_buffer),
+             kURLMaxSize - strlen(xml_scratch_buffer),
              "<%s>%s</%s>",
              element, Print(), element);
 
@@ -339,7 +343,7 @@ size_t URL::InitFromBuf(const char* buf, const size_t len,
   if (strlen(buf) == 0)
     return 0;  // if no work, return
 
-  char scratch_buffer[SCRATCH_BUF_SIZE];
+  char scratch_buffer[kURLMaxSize];
   size_t n = len;  // set aside byte cnt
 
 #if DEBUG_PARSE

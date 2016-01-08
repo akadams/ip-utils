@@ -233,7 +233,8 @@ void SSLContext::Init(const SSL_METHOD* method, const char* session_id,
   if ((CAfile != NULL && strlen(CAfile)) ||
       (CApath != NULL && strlen(CApath))) {
     if (!SSL_CTX_load_verify_locations(ctx_, CAfile, CApath)) {
-      error.Init(EX_SOFTWARE, "SSLContext::SSL_CTX_load_verify_locations(): %s",
+      error.Init(EX_SOFTWARE, "SSLContext::SSL_CTX_load_verify_locations(): "
+                 "CAfile (%s), CApath(%s): %s", CAfile, CApath,
                  ssl_err_str().c_str());
       return;
     }

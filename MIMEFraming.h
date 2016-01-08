@@ -27,6 +27,7 @@ using namespace std;
 
 // Message-header field types.
 #define MIME_VERSION "MIME-Version"
+#define MIME_AUTHORIZATION "Authorization"
 #define MIME_CONTENT_LENGTH "Content-Length"
 #define MIME_CONTENT_ENCODING "Content-Encoding"
 #define MIME_CONTENT_TYPE "Content-Type"
