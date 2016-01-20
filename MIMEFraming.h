@@ -46,6 +46,7 @@ using namespace std;
 #define MIME_TEXT_PLAIN "text/plain"
 
 #define MIME_APP_JSON "application/json"
+#define MIME_APP_X_WWW_FORM_URLENCODED "application/x-www-form-urlencoded"
 
 #define MIME_IMAGE_GIF "image/gif"
 #define MIME_IMAGE_PNG "image/png"

@@ -1,6 +1,6 @@
 # $Id: Makefile,v 1.7 2013/09/13 14:56:38 akadams Exp $
 
-VERSION = 1.1.0
+VERSION = 1.2.0
 
 PREFIX = /usr/local
 BIN_DIR = /bin
@@ -23,7 +23,7 @@ TAR_SRC_DIR = ip-utils-${VERSION}
 TAR_SRC_NAME = ip-utils-${VERSION}.tar
 GZIP_PATH = gzip
 
-OBJS = ErrorHandler.o Descriptor.o File.o Logger.o IPComm.o TCPConn.o SSLConn.o URL.o MIMEFraming.o HTTPFraming.o MsgHdr.o TCPSession.o SSLContext.o SSLSession.o
+OBJS = ErrorHandler.o Base64.o Descriptor.o File.o Logger.o IPComm.o TCPConn.o SSLConn.o URL.o MIMEFraming.o HTTPFraming.o MsgHdr.o TCPSession.o SSLContext.o SSLSession.o
 
 all: libip-utils.a
 
