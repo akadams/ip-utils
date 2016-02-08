@@ -73,8 +73,7 @@ void HdrStorage::clear(void) {
 // MsgHdr Class.
 
 // Constructors and destructor.
-#if 0
-// TODO(aka) Finish void implementation.
+#if 0  // TODO(aka) Void constructor made private (see MsgHdr.h)
 MsgHdr::MsgHdr(void) 
   : hdr_() {
 #if DEBUG_CLASS

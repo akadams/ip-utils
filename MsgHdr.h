@@ -136,11 +136,6 @@ class MsgHdr {
   /** Constructor.
    *
    */
-  MsgHdr(void);
-
-  /** Constructor.
-   *
-   */
   explicit MsgHdr(const uint8_t type);
 
   /** Destructor.
@@ -300,7 +295,8 @@ class MsgHdr {
   HdrStorage hdr_;              // our *possible* headers
 
  private:
-  // Dummy declarations for copy constructor and assignment & equality operator.
+  // Dummy declarations for constructor and equality operator.
+  MsgHdr(void);
   int operator ==(const MsgHdr& other) const;
 };
 

@@ -519,30 +519,35 @@ bool HTTPFraming::InitFromBuf(const char* buf, const size_t len,
           "bytes_used: %ld, buf[%ld]: %s.", *bytes_used, len - n, buf_ptr);
 #endif
 
-  if (strlen(buf_ptr) <= strlen(kHTTPSlash))
-    return false;  // not enough data yet
-
   // Proceed depending on the first element of the status-line ...
   bool ret_val = false;
   size_t parse_bytes_used = 0;
-  if (strncasecmp(kMethodGet, buf_ptr, strlen(kMethodGet)) == 0)
+  if (n >= strlen(kMethodGet) &&
+      !strncasecmp(kMethodGet, buf_ptr, strlen(kMethodGet)))
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
-  else if (strncasecmp(kMethodHead, buf_ptr, strlen(kMethodHead)) == 0) 
+  else if (n >= strlen(kMethodHead) &&
+           !strncasecmp(kMethodHead, buf_ptr, strlen(kMethodHead))) 
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
-  else if (strncasecmp(kMethodPost, buf_ptr, strlen(kMethodPost)) == 0)
+  else if (n >= strlen(kMethodPost) &&
+           !strncasecmp(kMethodPost, buf_ptr, strlen(kMethodPost)))
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
-  else if (strncasecmp(kMethodPut, buf_ptr, strlen(kMethodPut)) == 0)
+  else if (n >= strlen(kMethodPut) &&
+           !strncasecmp(kMethodPut, buf_ptr, strlen(kMethodPut)))
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
-  else if (strncasecmp(kMethodDelete, buf_ptr, strlen(kMethodDelete)) == 0)
+  else if (n >= strlen(kMethodDelete) &&
+           !strncasecmp(kMethodDelete, buf_ptr, strlen(kMethodDelete)))
     ret_val = ParseRequestHdr(buf_ptr, n, default_port, &parse_bytes_used);
-  else if (strncasecmp(kHTTPSlash, buf_ptr, strlen(kHTTPSlash)) == 0) 
+  else if (n >= strlen(kHTTPSlash) &&
+           !strncasecmp(kHTTPSlash, buf_ptr, strlen(kHTTPSlash))) 
     ret_val = ParseResponseHdr(buf_ptr, n, &parse_bytes_used,
                                chunked_msg_body, chunked_msg_body_size);
-  else {
+  else if (n >= strlen(kMethodDelete)) {
     // ERROR ...
     error.Init(EX_SOFTWARE, "HTTPFraming::InitFromBuf(): "
                "unknown status-line: %s", buf_ptr);
     return false;
+  } else {
+    return false;  // not enough data yet
   }
 
 #if DEBUG_PARSE
@@ -1171,7 +1176,7 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   //
   //    key EQUALSIGN value
 
-  if (strlen(buf) == 0)
+  if (len <= 0)
     return 0;  // no work to do
 
   char scratch_buffer[SCRATCH_BUF_SIZE];

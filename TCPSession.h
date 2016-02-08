@@ -104,7 +104,10 @@ class TCPSession : public TCPConn {
    */
   void set_storage(const int storage);
 
-  void delete_whdr(list<MsgHdr>::iterator msg_hdr);
+  /** Routine to remove a MsgHdr from our write-headers (whdrs_).
+   *
+   */
+  void delete_whdr(const uint16_t msg_id);
 
   /*
   // XXX Deprecated.

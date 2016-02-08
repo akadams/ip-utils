@@ -270,13 +270,25 @@ void TCPSession::set_storage(const int storage) {
 }
 
 // Routine to *erase* a specific MsgHdr from our list (whdrs_).
-void TCPSession::delete_whdr(list<MsgHdr>::iterator msg_hdr) {
+void TCPSession::delete_whdr(const uint16_t msg_id) {
 #if DEBUG_MUTEX_LOCK
   warnx("TCPSession::delete_whdr(): requesting outgoing lock.");
 #endif
   pthread_mutex_lock(&outgoing_mtx);
 
-  whdrs_.erase(msg_hdr);
+  // Loop through our list and find the culprit ...
+  list<MsgHdr>::iterator itr = whdrs_.begin();
+  while (itr != whdrs_.end()) {
+    if (itr->msg_id() == msg_id)
+      break;
+  
+    itr++;
+  }
+  if (itr != whdrs_.end())
+    whdrs_.erase(itr);
+  else
+    _LOGGER(LOG_INFO, "TCPSession::delete_whdr(): Unable to find msg-id: %d",
+            msg_id);
 
 #if DEBUG_MUTEX_LOCK
   warnx("TCPSession::delete_whdr(): releasing outgoing lock.");

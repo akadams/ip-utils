@@ -269,13 +269,25 @@ void SSLSession::set_storage(const int storage) {
 }
 
 // Routine to *erase* a specific MsgHdr from our list (whdrs_).
-void SSLSession::delete_whdr(list<MsgHdr>::iterator msg_hdr) {
+void SSLSession::delete_whdr(const uint16_t msg_id) {
 #if DEBUG_MUTEX_LOCK
   warnx("SSLSession::delete_whdr(): requesting outgoing lock.");
 #endif
   pthread_mutex_lock(&outgoing_mtx);
 
-  whdrs_.erase(msg_hdr);
+  // Loop through our list and find the culprit ...
+  list<MsgHdr>::iterator itr = whdrs_.begin();
+  while (itr != whdrs_.end()) {
+    if (itr->msg_id() == msg_id)
+      break;
+  
+    itr++;
+  }
+  if (itr != whdrs_.end())
+    whdrs_.erase(itr);
+  else
+    _LOGGER(LOG_INFO, "SSLSession::delete_whdr(): Unable to find msg-id: %d",
+            msg_id);
 
 #if DEBUG_MUTEX_LOCK
   warnx("SSLSession::delete_whdr(): releasing outgoing lock.");
@@ -292,8 +304,9 @@ string SSLSession::print(void) const {
   string tmp_str(kDefaultBufSize, '\0');
 
   snprintf((char*)tmp_str.c_str(), kDefaultBufSize, 
-           "%s:%d:%lu:%ld:%ld:%s:%ld:%ld:%ld:%ld:%ld", 
-           SSLConn::print().c_str(), handle_, rtid_, (long)rbuf_size_, (long)rbuf_len_, 
+           "%s:%d:%lu:%ld:%ld:%d:%s:%ld:%ld:%ld:%ld:%ld", 
+           SSLConn::print().c_str(), handle_, rtid_,
+           (long)rbuf_size_, (long)rbuf_len_, (int)rpending_.initialized,
            rfile_.print().c_str(), (long)wbuf_size_, (long)wbuf_len_,
            (long)wfiles_.size(), (long)wpending_.size(), (long)whdrs_.size());
 
@@ -312,8 +325,8 @@ void SSLSession::Init(void) {
     return;
   }
 
-  if ((rbuf_ = (char*)malloc(kDefaultBufSize)) == NULL) {
-    error.Init(EX_OSERR, "SSLSession::Init(): rbuf malloc(%d) failed", 
+  if ((rbuf_ = (char*)calloc(kDefaultBufSize, 1)) == NULL) {
+    error.Init(EX_OSERR, "SSLSession::Init(): rbuf calloc(%d) failed", 
                kDefaultBufSize);
     return;
   }
@@ -1184,7 +1197,8 @@ bool SSLSession::IsOutgoingDataPending(void) const {
        msg != wpending_.end(); msg++) {
     //_LOGGER(LOG_DEBUG, "SSLSession::IsOutgoingDataPending(): Checking to_peer %d wpending: %d, %ld, %ld, %ld, %ld, wbuf len: %ld\n", peer->handle(), msg->storage, msg->hdr_len, msg->body_len, msg->buf_offset, msg->file_offset, peer->wbuf_len());
 
-    if ((msg->storage == SESSION_USE_MEM && (msg->buf_offset < (msg->hdr_len + msg->body_len))) ||
+    if ((msg->storage == SESSION_USE_MEM &&
+         (msg->buf_offset < (msg->hdr_len + msg->body_len))) ||
         (msg->storage == SESSION_USE_DISC && ((msg->buf_offset < msg->hdr_len) || 
           (msg->file_offset < msg->body_len)))) {
       data_ready = true;
