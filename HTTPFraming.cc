@@ -1096,7 +1096,8 @@ bool HTTPFraming::ParseResponseHdr(const char* buf, const size_t len,
 
 #if DEBUG_PARSE
     _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
-            "next msg-hdr(%ld): %s.", (len - n), buf_ptr);
+            "len: %ld, n: %ld, next msg-hdr(%ld): %s.", 
+            len, n, (len - n), buf_ptr);
 #endif
   }
 
@@ -1114,42 +1115,50 @@ bool HTTPFraming::ParseResponseHdr(const char* buf, const size_t len,
     msg_hdrs_.clear();
     return false;
   }
-  buf_ptr++;  // skip '\n'
-  if (--n == 0)
-    return false;  // not enough data yet
+  buf_ptr++; --n; // skip '\n'
 
   // End of message header.
   msg_type_ = HTTPFraming::RESPONSE;
 
+  // See if we have more data, e.g., chunked data, that we can parse
+  // as part of the header.
+
+  if (n > 0) {
 #if DEBUG_PARSE
-  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
-          "status code %d, buf[%ld]: %s.",
-          status_code_, (len - n), buf_ptr);
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
+            "status code %d, len: %ld, n: %ld, buf[%ld]: %s.",
+            status_code_, len, n, (len - n), buf_ptr);
 #endif
 
-  // Okay, RFC 2616 says that the server does *not* need to use
-  // 'Content-length' to signify additional data *if*
-  // 'Transfer-Encoding' is set to chunked.  Unfortunately, the rest
-  // of the this library uses 'Content-Length' to know when we have a
-  // complete message.  Thus, if *chunked* is set, we need to keep
-  // reading *now* to process the chunks.
+    // Okay, RFC 2616 says that the server does *not* need to use
+    // 'Content-length' to signify additional data *if*
+    // 'Transfer-Encoding' is set to chunked.  Unfortunately, the rest
+    // of the this library uses 'Content-Length' to know when we have a
+    // complete message.  Thus, if *chunked* is set, we need to keep
+    // reading *now* to process the chunks.
 
-  static const char* kMimeChunked = MIME_CHUNKED;
-  if (strlen(kMimeChunked) == strlen(transfer_encoding().c_str()) &&
-      !strncasecmp(kMimeChunked, transfer_encoding().c_str(), 
-                   strlen(kMimeChunked))) {
-    // Great, there's a chunked message-body, joy.
-    size_t chunked_bytes_used = 0;
-    if (!ParseChunkedMsgBody(buf_ptr, len - n, &chunked_bytes_used,
-                             chunked_msg_body, chunked_msg_body_size)) {
-      if (error.Event())
-        error.AppendMsg("HTTPFraming::ParseResponseHdr(): ");
+    static const char* kMimeChunked = MIME_CHUNKED;
+    if (strlen(kMimeChunked) == strlen(transfer_encoding().c_str()) &&
+        !strncasecmp(kMimeChunked, transfer_encoding().c_str(), 
+                     strlen(kMimeChunked))) {
+      // Great, there's a chunked message-body, joy.
+      size_t chunked_bytes_used = 0;
+      if (!ParseChunkedMsgBody(buf_ptr, len - n, &chunked_bytes_used,
+                               chunked_msg_body, chunked_msg_body_size)) {
+        if (error.Event())
+          error.AppendMsg("HTTPFraming::ParseResponseHdr(): ");
 
-      msg_hdrs_.clear();
-      return false;  // either not enough data or we encountered an error
+        msg_hdrs_.clear();
+        return false;  // either not enough data or we encountered an error
+      }
+
+      n -= chunked_bytes_used;
     }
-
-    n -= chunked_bytes_used;
+  } else {
+#if DEBUG_PARSE
+    _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
+            "status code %d, len: %ld, n: %ld.", status_code_, len, n);
+#endif
   }
 
   *bytes_used = len - n;  // amount of data we used in buf
@@ -1184,8 +1193,8 @@ size_t HTTPFraming::ParseMsgHdr(const char* buf, const size_t len) {
   size_t n = len;  // set aside byte cnt
 
 #if DEBUG_PARSE
-  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): buf[%ld]: %s.",
-          (len - n), buf);
+  _LOGGER(LOG_NOTICE, "HTTPFraming::ParseMsgHdr(): %dB buf[%ld]: %s.",
+          (int)len, (len - n), buf);
 #endif
 
   const char* buf_ptr = buf;  // setup a walking pointer
