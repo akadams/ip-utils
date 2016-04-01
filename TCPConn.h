@@ -109,6 +109,42 @@ class TCPConn : public IPComm {
    */
   void Clone(const TCPConn& src);
 
+  /** Routine to initialize an IPComm object.
+   *
+   *  Work beyond what is suitable for the class constructor needs to
+   *  be performed. This simply entails calling IPComm:Init() to
+   *  install an Internet address in our sockaddr_ union, and
+   *  associating this TCPConn object to a TCPContext object.
+   *
+   *  Note, this routine can set an ErrorHandler event if it
+   *  encounters an unrecoverable error.
+   *
+   *  @see ErrorHandler 
+   *  @see IPComm
+   *  @param host is a char* specifiying the Internet address to use
+   *  for this peer
+   *  @param address_family is an int specifying the address family
+   *  @param retry_cnt controls address resolution attempts
+   */
+  void Init(const char* host, const int address_family, int retry_cnt);
+
+  /** Routine to initialize an IPComm object.
+   *
+   *  Work beyond what is suitable for the class constructor needs to
+   *  be performed. This simply entails calling IPComm:Init() to
+   *  install the wildcard Internet address (either INADDR_ANY or
+   *  in6addr_any) depending on what address family is passed in.
+   *
+   *  Note, this routine can set an ErrorHandler event if it
+   *  encounters an unrecoverable error.
+   *
+   *  @see ErrorHandler 
+   *  @see IPComm
+   *  @see IPComm::Setsockopt()
+   *  @param address_family is an int specifying the address family
+   */
+  void InitServer(const int address_family);
+
   /** Routine to issue a connect(2) to the destination within our object.
    *
    *  This routine attempts to connect(2) *to* the destinatino

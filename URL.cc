@@ -219,22 +219,14 @@ void URL::clear(void) {
 
 // Routine to *pretty* print out the URL object.
 string URL::print(void) const {
+  return URL::print_absoluteURI();  // just return an absoluteURI
+}
+
+// Routine to print out just the path, query and fragment.
+//
+// Note, this is what HTTP/1.1 calls an abs_path.
+string URL::print_abs_path(void) const {
   string tmp_str(kURLMaxSize, '\0');  // '\0' so strlen() works
-
-  if (scheme_.size() > 0)
-    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             kURLMaxSize - strlen(tmp_str.c_str()), "%s://", 
-             scheme_.c_str());
-
-  if (host_.size() > 0)
-    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             kURLMaxSize - strlen(tmp_str.c_str()), "%s", 
-             host_.c_str());
-
-  if (port_ != URL_PORT_NULL)
-    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
-             kURLMaxSize - strlen(tmp_str.c_str()), ":%hu", 
-             port_);
 
   if (path_.size() > 0)
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
@@ -263,6 +255,34 @@ string URL::print(void) const {
     snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
              kURLMaxSize - strlen(tmp_str.c_str()), "#%s", 
              fragment_.c_str());
+
+  return tmp_str;
+}
+
+// Routine to print out an HTTP/1.1 absoluteURI.
+string URL::print_absoluteURI(void) const {
+  string tmp_str(kURLMaxSize, '\0');  // '\0' so strlen() works
+
+  if (scheme_.size() > 0)
+    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+             kURLMaxSize - strlen(tmp_str.c_str()), "%s://", 
+             scheme_.c_str());
+
+  if (host_.size() > 0)
+    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+             kURLMaxSize - strlen(tmp_str.c_str()), "%s", 
+             host_.c_str());
+
+  if (port_ != URL_PORT_NULL)
+    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+             kURLMaxSize - strlen(tmp_str.c_str()), ":%hu", 
+             port_);
+
+  string tmp_path = URL::print_abs_path();
+  if (tmp_path.size() > 0)
+    snprintf((char*)tmp_str.c_str() + strlen(tmp_str.c_str()), 
+             kURLMaxSize - strlen(tmp_str.c_str()), "%s", 
+             tmp_path.c_str());
 
   return tmp_str;
 }

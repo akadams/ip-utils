@@ -131,6 +131,28 @@ void TCPConn::Clone(const TCPConn& src) {
   TCPConn::operator =(src);  // use our assignment operator, since we have one
 }
 
+// Routine to initialize our TCPConn.
+//
+// Note, this routine can set an ErrorHandler event.
+void TCPConn::Init(const char* host, const int address_family, int retry_cnt) {
+  IPComm::Init(host, address_family, retry_cnt);
+  if (error.Event()) {
+    error.AppendMsg("TCPConn::Init(): ");
+    return;
+  }
+}
+
+// Routine to initialize our TCPConn as a server.
+//
+// Note, this routine can set an ErrorHandler event.
+void TCPConn::InitServer(const int address_family) {
+  IPComm::InitServer(address_family);
+  if (error.Event()) {
+    error.AppendMsg("TCPConn::InitServer(): ");
+    return;
+  }
+}
+
 // Routine to issue a connect(2) on our socket.
 //
 // Note, this routine can set an ErrorHandler event.
@@ -184,6 +206,10 @@ void TCPConn::Connect(void) {
 }
 
 // Routine to issue a connect(2) on a socket.
+//
+// TOOD(aka) This routine needs deprecated.  Users should simply use
+// TCPConn::Init() followed by TCPConn::Connect(), which is pretty
+// much all that this routine does!
 //
 // Note, this routine can set an ErrorHandler event.
 void TCPConn::Connect(const char* host, const in_port_t port, 
@@ -367,7 +393,8 @@ void TCPConn::Accept(TCPConn* client) const {
 //
 // Note, this routine can set an ErrorHandler event.
 TCPConn TCPConn::Accept(void) const {
-  TCPConn client;  // XXX TODO(aka) We need framing type here!
+  TCPConn client;  // XXX TODO(aka) We need framing type here!  Why?
+                   // Framing is part of TCPSession, not TCPConn?
 
   // Call TCPConn::Accept(TCPConn*) to get the work done.
   Accept(&client);

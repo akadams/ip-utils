@@ -27,13 +27,14 @@ using namespace std;
  * Class for controlling SSL/TLS encryption over TCP/IP connections.
  *
  * The SSLConn class is derived from the TCPConn class, which itself
- * is dervived from the IPComm class.  It only adds three additional
- * data member: the OpenSSL object, the peer certificate (if we
- * received one), and a flag to show what state we are in (useful for
- * terminating the connection).  Several of TCP connectoin-oriented
- * functions, e.g., bind(), listen(), accept(), connect(), read() and
- * write() are overwritten.  This class can be used by itself, or as
- * the base class to higher-layer abstractions, e.g., SSLSession.
+ * is dervived from the IPComm class.  It only adds two additional
+ * data member: the OpenSSL object and the peer certificate (if we
+ * received one).  All the TCP connection-oriented functions, e.g.,
+ * bind(), listen(), accept(), connect(), read() and write() are
+ * overwritten to handle either a SSL/TLS connection, or a simple TCP
+ * one, which is usually done by testing if the SSL object is NULL.
+ * This class can be used by itself, or as the base class to
+ * higher-layer abstractions, e.g., SSLSession.
  *
  * RCSID: $Id: SSLConn.h,v 1.2 2012/03/19 15:15:34 akadams Exp $
  *
@@ -322,7 +323,8 @@ class SSLConn : public TCPConn {
   // Dummy declarations for copy constructor and assignment & equality operator.
 
   // Since we're dervied from TCPConn, we need to prevent someone from
-  // accidentally using non-encrypted I/O.
+  // accidentally using non-encrypted I/O.  TODO(aka) Fix this, as
+  // using a TCPConn object as the base is legit in SSLSession!
 
   ssize_t ReadExhaustive(const ssize_t len, char* buf, bool* eof) const;
   ssize_t ReadLine(const char framing, const ssize_t len, char* buf,

@@ -133,7 +133,7 @@ size_t MsgHdr::hdr_len(void) const {
       break;
 
     case TYPE_HTTP :
-      len = hdr_.http_.hdr_len();
+      len = hdr_.http_.hdr_len(false);  // only used on _rhdr in TCPSession
       break;
 
     default :
@@ -312,9 +312,11 @@ string MsgHdr::print(void) const {
       break;
 
     case TYPE_HTTP :
-      // Just output the start line.
+      // Just output the start line.  (TODO(aka) not sure if the
+      // abs_path param is, or will ever be used via MsgHdr.
+
       snprintf((char*)tmp_str.c_str(), 1024, "%d:%s",
-               msg_id_, hdr_.http_.print_start_line().c_str());
+               msg_id_, hdr_.http_.print_start_line(false).c_str());
       break;
 
     default :
@@ -336,7 +338,7 @@ string MsgHdr::print_hdr(const int offset) const {
       break;
 
     case TYPE_HTTP :
-      tmp_hdr = hdr_.http_.print_hdr(offset);
+      tmp_hdr = hdr_.http_.print_hdr(offset, false);  // TODO(aka) see print()
       break;
 
     default :

@@ -90,10 +90,22 @@ class URL {
    *
    *  Depending on the scheme and port, you will either get just a
    *  hostname, a 2-tuple, i.e., hostname COLON port, or a complete
-   *  URL.
-   *
+   *  URL.  This is equivalent to the HTTP/1.1 terminology of
+   *  *absoluteURI*, and in fact, simply calls print_absoluteURI().
    */ 
   string print(void) const;
+
+  /** Routine to *print-out* an absoluteURI.
+   *
+   *  Note, an absoluteURI is specified in the HTTP/1.1 specs.
+   */
+  string print_absoluteURI(void) const;
+
+  /** Routine to *print-out* an abs_path.
+   *
+   *  Note, an abs_path is specified in the HTTP/1.1 specs.
+   */ 
+  string print_abs_path(void) const;
 
   //const char* print_xml(const int indent_level, const char* element = URL_XML_ELEMENT, const char* version_attribute = NULL) const;
 
@@ -145,11 +157,12 @@ class URL {
 
  protected:
   // Data members.
-  string scheme_;
-  string host_;
-  in_port_t port_;
-  string path_;
-  list<struct url_query_info> query_;    // we can have multiple key-value pairs in a query
+  string scheme_;      // scheme in URL
+  string host_;        // host
+  in_port_t port_;     // port
+  string path_;        // just the path part of the URL (not query/fragment)
+  list<struct url_query_info> query_;    // we can have multiple
+                                         // key-value pairs in a query
   string fragment_;
 
  private:

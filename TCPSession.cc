@@ -13,10 +13,9 @@
 
 #include "TCPSession.h"
 
-
 #define DEBUG_CLASS 0
 #define DEBUG_INCOMING_DATA 0
-#define DEBUG_OUTGOING_DATA 1
+#define DEBUG_OUTGOING_DATA 0
 #define DEBUG_MUTEX_LOCK 0
 
 // Non-class specific defines & data structures.
@@ -69,7 +68,7 @@ TCPSession::~TCPSession(void) {
 
 // Copy constructor, assignment and equality operator needed for STL.
 TCPSession::TCPSession(const TCPSession& src)
-    : TCPConn(src), rfile_(src.rfile_), rhdr_(src.rhdr_), 
+    : SSLConn(src), rfile_(src.rfile_), rhdr_(src.rhdr_), 
       wfiles_(src.wfiles_), wpending_(src.wpending_), whdrs_(src.whdrs_) {
 #if DEBUG_CLASS
   warnx("TCPSession::TCPSession(const TCPSession&) called.");
@@ -143,8 +142,8 @@ TCPSession::operator =(const TCPSession& src) {
 
 #if 0  // XXX
 int TCPSession::operator ==(const TCPSession& other) const {
-  if (TCPConn::operator ==(other) == 0)
-    return 0;  // if TCPConn::operator ==() is false, we're all done
+  if (SSLConn::operator ==(other) == 0)
+    return 0;  // if SSLConn::operator ==() is false, we're all done
 
   // If our id, buffer sizes and data lengths match, most likely we're
   // are the same.
@@ -305,9 +304,9 @@ string TCPSession::print(void) const {
   string tmp_str(kDefaultBufSize, '\0');
 
   snprintf((char*)tmp_str.c_str(), kDefaultBufSize, 
-           "%s:%d:%lu:%ld:%ld:%s:%ld:%ld:%ld:%ld:%ld", 
-           TCPConn::print().c_str(), handle_, (unsigned long)rtid_, 
-           (long)rbuf_size_, (long)rbuf_len_, 
+           "%s:%d:%lu:%ld:%ld:%d:%s:%ld:%ld:%ld:%ld:%ld", 
+           SSLConn::print().c_str(), handle_, rtid_,
+           (long)rbuf_size_, (long)rbuf_len_, (int)rpending_.initialized,
            rfile_.print().c_str(), (long)wbuf_size_, (long)wbuf_len_,
            (long)wfiles_.size(), (long)wpending_.size(), (long)whdrs_.size());
 
@@ -326,8 +325,8 @@ void TCPSession::Init(void) {
     return;
   }
 
-  if ((rbuf_ = (char*)malloc(kDefaultBufSize)) == NULL) {
-    error.Init(EX_OSERR, "TCPSession::Init(): rbuf malloc(%d) failed", 
+  if ((rbuf_ = (char*)calloc(kDefaultBufSize, 1)) == NULL) {
+    error.Init(EX_OSERR, "TCPSession::Init(): rbuf calloc(%d) failed", 
                kDefaultBufSize);
     return;
   }
@@ -362,6 +361,7 @@ bool TCPSession::InitIncomingMsg(void) {
 #endif
   pthread_mutex_lock(&incoming_mtx);
 
+  // Set aside space in case our incoming message-body is chunked.
   char* chunked_msg_body = NULL;
   size_t chunked_msg_body_size = kDefaultBufSize;
   if ((chunked_msg_body = (char*)calloc(chunked_msg_body_size, 1)) == NULL) {
@@ -618,7 +618,7 @@ bool TCPSession::AddMsgFile(const char* framing_hdr, const ssize_t hdr_len,
   return true;
 }
 
-// Routine to read, via TCPConn::Read(), any data on the socket and
+// Routine to read, via SSLConn::Read(), any data on the socket and
 // store in our internal buffer (rbuf_).
 //
 // Note, this routine can set an ErrorHandler event.
@@ -637,15 +637,17 @@ ssize_t TCPSession::Read(bool* eof) {
 
 #if DEBUG_INCOMING_DATA
   _LOGGER(LOG_NOTICE, "DEBUG: TCPSession::Read(): "
-          "Entering: rpending msg: %d, %d, %ld, %ld, %ld, %ld.", 
+          "Entering: rbuf: %ld, %ld, eof: %d, "
+          "rpending: %d, %d, %ld, %ld, %ld, %ld.", 
+          rbuf_size_, rbuf_len_, *eof,
           rpending_.storage, rpending_.storage_initialized, 
           rpending_.hdr_len, rpending_.body_len, rpending_.buf_offset,
           rpending_.file_offset);
 #endif
 
-  // Call TCPConn::Read() to get the work done.
+  // Call SSLConn::Read() to get the work done.
   ssize_t bytes_read = 
-      TCPConn::Read(rbuf_size_ - rbuf_len_, rbuf_ + rbuf_len_, eof);
+      SSLConn::Read(rbuf_size_ - rbuf_len_, rbuf_ + rbuf_len_, eof);
   if (error.Event()) {
     error.AppendMsg("TCPSession::Read(): "
                     "rbuf_ %p, rbuf_len_ %ld, rbuf_size_ %ld, eof %d: "
@@ -686,7 +688,9 @@ ssize_t TCPSession::Read(bool* eof) {
 
 #if DEBUG_INCOMING_DATA
   _LOGGER(LOG_NOTICE, "DEBUG: TCPSession::Read(): "
-          "Leaving: rpending msg: %d, %ld, %ld, %ld, %ld.", 
+          "Leaving: rbuf: %ld, %ld, eof: %d, "
+          "rpending: %d, %ld, %ld, %ld, %ld.", 
+          rbuf_size_, rbuf_len_, *eof, 
           rpending_.storage, rpending_.hdr_len, rpending_.body_len, 
           rpending_.buf_offset, rpending_.file_offset);
 #endif
@@ -698,7 +702,7 @@ ssize_t TCPSession::Read(bool* eof) {
   return bytes_read;
 }
 
-// Routine to write, via TCPConn::Write(), the next messages in our
+// Routine to write, via SSLConn::Write(), the next messages in our
 // object.  The message info (struct MsgInfo) queue (wpending_)
 // contains the meta data for each message to be sent out.  The
 // message header is always in the internal memory buffer (wbuf_),
@@ -758,9 +762,9 @@ ssize_t TCPSession::Write(void) {
 
     ssize_t msg_len = hdr_len + body_len;  // message is all within wbuf_
 
-    // Send the message out (header & body) using TCPConn::Write().
+    // Send the message out (header & body) using SSLConn::Write().
     bytes_sent = 
-        TCPConn::Write(wbuf_ + wpending_.front().buf_offset, 
+        SSLConn::Write(wbuf_ + wpending_.front().buf_offset, 
                        msg_len - wpending_.front().buf_offset);
     if (error.Event()) {
       error.AppendMsg("TCPSession::Write(): "
@@ -789,9 +793,9 @@ ssize_t TCPSession::Write(void) {
 
     // First, see if the header needs to be sent.
     if (wpending_.front().buf_offset < hdr_len) {
-      // Send the message header out using TCPConn::Write().
+      // Send the message header out using SSLConn::Write().
       bytes_sent = 
-          TCPConn::Write(wbuf_ + wpending_.front().buf_offset,
+          SSLConn::Write(wbuf_ + wpending_.front().buf_offset,
                          hdr_len - wpending_.front().buf_offset);
       if (error.Event()) {
         error.AppendMsg("TCPSession::Write(): "
@@ -882,8 +886,8 @@ ssize_t TCPSession::Write(void) {
       return bytes_sent;
     }
 
-    // ... and send the next chunk out using TCPConn::Write()
-    bytes_sent = TCPConn::Write(tmp_buf, n);  // redo bytes_sent
+    // ... and send the next chunk out using SSLConn::Write()
+    bytes_sent = SSLConn::Write(tmp_buf, n);  // redo bytes_sent
     if (error.Event()) {
       error.AppendMsg("TCPSession::Write(): "
                       "file %s, body_len %ld, file_offset %ld: ", 
@@ -1169,6 +1173,18 @@ void TCPSession::PopOutgoingMsgQueue(void) {
 
 // Boolean functions.
 
+#if 0  // Decprecated.
+// Routine to make sure we have all of our message (hdr + body).
+bool TCPSession::IsIncomingMsgComplete(void) const {
+  if (rpending_.initialized == 0)
+    return false;  // need to call InitIncomingMsg()
+
+  if (framing_type_ == MsgHdr::TYPE_BASIC)
+    return ((rpending_.file_offset >= rpending_.body_len) ||
+             (rbuf_len_ >= rpending_.body_len)) ? true : false;
+}
+#endif
+
 // Routine to check if we have any pending outgoing data sitting in
 // this TCPSession.
 bool TCPSession::IsOutgoingDataPending(void) const {
@@ -1181,7 +1197,8 @@ bool TCPSession::IsOutgoingDataPending(void) const {
        msg != wpending_.end(); msg++) {
     //_LOGGER(LOG_DEBUG, "TCPSession::IsOutgoingDataPending(): Checking to_peer %d wpending: %d, %ld, %ld, %ld, %ld, wbuf len: %ld\n", peer->handle(), msg->storage, msg->hdr_len, msg->body_len, msg->buf_offset, msg->file_offset, peer->wbuf_len());
 
-    if ((msg->storage == SESSION_USE_MEM && (msg->buf_offset < (msg->hdr_len + msg->body_len))) ||
+    if ((msg->storage == SESSION_USE_MEM &&
+         (msg->buf_offset < (msg->hdr_len + msg->body_len))) ||
         (msg->storage == SESSION_USE_DISC && ((msg->buf_offset < msg->hdr_len) || 
           (msg->file_offset < msg->body_len)))) {
       data_ready = true;
@@ -1191,6 +1208,7 @@ bool TCPSession::IsOutgoingDataPending(void) const {
 
   return data_ready;
 }
+
 
 // Private member functions.
 

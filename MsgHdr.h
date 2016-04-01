@@ -160,6 +160,9 @@ class MsgHdr {
 
   /** Routine to get the framing header length.
    *
+   *  Since this routine is only called on our *read* headers, we have
+   *  no need to worry about passing in the bool abs_path.
+   *
    *  @return a size_t specifying the framing-header length
    */
   size_t hdr_len(void) const;

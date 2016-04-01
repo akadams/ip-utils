@@ -60,9 +60,13 @@ SSLConn::SSLConn(const SSLConn& src)
   warnx("SSLConn::SSLConn(const SSLConn&) called.");
 #endif
 
-  ssl_ = src.ssl_;  // note, ref count in Descriptor is bumped in IPComm copy constructor
+  ssl_ = src.ssl_;  // note, ref count in Descriptor is bumped in
+                    // IPComm copy constructor
 
-  peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
+  if (ssl_ != NULL)
+    peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
+  else 
+    peer_certificate_ = NULL;
 }
 
 SSLConn& SSLConn::operator =(const SSLConn& src) {
@@ -80,9 +84,14 @@ SSLConn& SSLConn::operator =(const SSLConn& src) {
   // peer_certificate may or may not have already been alocated ...
   if (peer_certificate_ != NULL)
     X509_free(peer_certificate_);
-  peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
 
-  TCPConn::operator =(src);  // finally, get the majority of the work done in TCPConn
+  if (ssl_ != NULL)
+    peer_certificate_ = SSL_get_peer_certificate(ssl_);  // SSL_get_peer_cerfificate() ref counts
+  else 
+    peer_certificate_ = NULL;
+
+  TCPConn::operator =(src);  // finally, get the majority of the work
+                             // done in TCPConn
 
   return *this;
 }
@@ -93,6 +102,7 @@ int SSLConn::operator ==(const SSLConn& other) const {
   warnx("SSLConn::operator ==(const SSLConn&) called.");
 #endif
 
+  // HACK: If the TCP five-tuple's the same, then we're the same ...
   return TCPConn::operator ==(other);
 }
 
@@ -124,6 +134,7 @@ string SSLConn::print(void) const {
   // Print retuns the host, port and socket.
   string tmp_str(SCRATCH_BUF_SIZE, '\0');
 
+  // For now, just return our TCPConn data members.
   snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%s", 
            TCPConn::print().c_str());
 
@@ -134,6 +145,9 @@ string SSLConn::print(void) const {
 //
 // Note, this routine can set an ErrorHandler event.
 void SSLConn::Init(const char* host, const int address_family, int retry_cnt) {
+  // TODO(aka) For some reason, we don't have a TCPConn::Init().  This
+  // may be expected behavior, but it seems a bit odd.
+  printf("XXX Add TCPConn::Init()!\n");
   IPComm::Init(host, address_family, retry_cnt);
   if (error.Event()) {
     error.AppendMsg("SSLConn::Init(): ");
@@ -163,8 +177,12 @@ void SSLConn::Socket(const int domain, const int type, const int protocol,
     return;
   }
 
-  // Okay, we now have a file desciptor, so get a SSL* object (which
-  // we reference count via the Descriptor ojbect).
+  if (ctx == NULL)
+    return;  // we're not using SSL/TLS
+
+  // Okay, we must want an SSL/TLS object.  Now that we have a file
+  // desciptor, simply get a SSL* object (which we reference count via
+  // the Descriptor ojbect).
 
   if ((ssl_ = SSL_new(ctx->ctx_)) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Socket(): SSL_new(3) failed: %s", 
@@ -177,18 +195,18 @@ void SSLConn::Socket(const int domain, const int type, const int protocol,
 //
 // Note, this routine can set an ErrorHandler event.
 void SSLConn::Connect(void) {
-  if (ssl_ == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Connect(): SSL* object NULL!");
-    return;
-  }
-
   TCPConn::Connect();  // get the majority of the work done
   if (error.Event()) {
     error.AppendMsg("SSLConn::Connect(): ");
     return;
   }
 
-  // Associate the TCP file descriptor to our SSL* object.
+  if (ssl_ == NULL)
+    return;  // we're not using SSL/TLS
+
+  // If we made it here, associate the TCP file descriptor to our SSL*
+  // object.
+
   if (!SSL_set_fd(ssl_, fd())) {
     error.Init(EX_SOFTWARE, "SSLConn::Connect(): SSL_set_fd(3) failed: %s", 
                ssl_err_str().c_str());
@@ -237,14 +255,15 @@ void SSLConn::Connect(void) {
 
       case SSL_ERROR_SSL :
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Connect(): Shutdown: SSL_ERROR_SSL: %s",
-                     ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Connect(): "
+                     "Shutdown: SSL_ERROR_SSL: %s", ssl_err_str().c_str());
           return;
         }
         break;
 
       default:
-        error.Init(EX_SOFTWARE, "SSLConn::Connect(): unknown ERROR: %s", ssl_err_str().c_str());
+        error.Init(EX_SOFTWARE, "SSLConn::Connect(): unknown ERROR: %s",
+                   ssl_err_str().c_str());
         return;
     }  // switch(SSL_get_error(ssl_, ret)) {
   } else if (ret < 0) {
@@ -256,11 +275,14 @@ void SSLConn::Connect(void) {
       case SSL_ERROR_WANT_WRITE :
         if (IsBlocking()) {
           // WTF!?!
-          error.Init(EX_SOFTWARE, "SSLConn::Connect(): SSL_ERROR_WANT_READ/SSL_ERROR_WANT_WRITE: "
-                     "on blocking connection to %s (fd %d)", hostname().c_str(), fd());
+          error.Init(EX_SOFTWARE, "SSLConn::Connect(): "
+                     "SSL_ERROR_WANT_READ/SSL_ERROR_WANT_WRITE: "
+                     "on blocking connection to %s (fd %d)",
+                     hostname().c_str(), fd());
           return;
         } else {
-          _LOGGER(LOG_INFO, "SSLConn::Connect(): received SSL_ERROR_WANT_READ/WRITE, returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Connect(): "
+                  "received SSL_ERROR_WANT_READ/WRITE, returning.");
           return;
         }
         break;
@@ -275,7 +297,8 @@ void SSLConn::Connect(void) {
           // WTF!?!
           error.Init(EX_SOFTWARE, "SSLConn::Connect(): "
                      "SSL_ERROR_WANT_ACCEPT/SSL_ERROR_WANT_CONNECT :"
-                     "on blocking connection to %s (fd %d)", hostname().c_str(), fd());
+                     "on blocking connection to %s (fd %d)",
+                     hostname().c_str(), fd());
           return;
         } else {
           _LOGGER(LOG_INFO, "SSLConn::Connect(): "
@@ -331,7 +354,9 @@ void SSLConn::Connect(void) {
     }  // switch(SSL_get_error(ssl_, ret)) {
   }  // else if (ret < 0) {
 
-  peer_certificate_ = SSL_get_peer_certificate(ssl_);  // if peer has a cert, get it
+  peer_certificate_ = SSL_get_peer_certificate(ssl_);  // if exists,
+                                                       // get cert
+                                                       // from peer
 
   if (peer_certificate_ != NULL) {
     char cn[SCRATCH_BUF_SIZE];
@@ -353,11 +378,6 @@ void SSLConn::Connect(void) {
 //
 // Note, this routine can set an ErrorHandler event.
 void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
-  if (ssl_ == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL* object NULL!");
-    return;
-  }
-
   TCPConn::Accept(peer);  // get the majority of the work done
   if (error.Event()) {
     error.AppendMsg("SSLConn::Accept(): ");
@@ -372,9 +392,12 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
   timeout.tv_usec = 0;
   peer->Setsockopt(SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof timeout);
 
-  // Okay, we now have a file desciptor, so get a SSL* object (which
-  // we reference count via the Descriptor ojbect), then associate our
-  // TCP file descriptor to it.
+  if (ssl_ == NULL)
+    return;  // we're not using SSL/TLS
+
+  // If we made it here, now that we have a file desciptor, let's get
+  // a SSL* object (which we reference count via the Descriptor
+  // ojbect), then associate our TCP file descriptor to it.
 
   if ((peer->ssl_ = SSL_new(ctx->ctx_)) == NULL) {
     error.Init(EX_SOFTWARE, "SSLConn::Accept(): SSL_new(3) failed: %s",
@@ -436,7 +459,8 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
         break;
 
       default:
-        error.Init(EX_SOFTWARE, "SSLConn::Accept: unknown ERROR: %s", ssl_err_str().c_str());
+        error.Init(EX_SOFTWARE, "SSLConn::Accept: unknown ERROR: %s",
+                   ssl_err_str().c_str());
         return;
     }  // switch(SSL_get_error(ssl_, ret)) {
   } else if (ret < 0) {
@@ -448,11 +472,14 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
       case SSL_ERROR_WANT_WRITE :
         if (IsBlocking()) {
           // WTF!?!
-          error.Init(EX_SOFTWARE, "SSLConn::Accept: SSL_ERROR_WANT_READ/SSL_ERROR_WANT_WRITE: "
-                     "on blocking connection to %s (fd %d)", peer->hostname().c_str(), fd());
+          error.Init(EX_SOFTWARE, "SSLConn::Accept: "
+                     "SSL_ERROR_WANT_READ/SSL_ERROR_WANT_WRITE: "
+                     "on blocking connection to %s (fd %d)",
+                     peer->hostname().c_str(), fd());
           return;
         } else {
-          _LOGGER(LOG_INFO, "SSLConn::Accept: received SSL_ERROR_WANT_READ/WRITE, returning.");
+          _LOGGER(LOG_INFO, "SSLConn::Accept: "
+                  "received SSL_ERROR_WANT_READ/WRITE, returning.");
           return;
         }
         break;
@@ -510,14 +537,16 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
 
       case SSL_ERROR_SSL :
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Accept: SSL_ERROR_SSL: %s", ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Accept: SSL_ERROR_SSL: %s",
+                     ssl_err_str().c_str());
           return;
         }
         break;
 
       default:
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Accept: unknown ERROR: %s", ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Accept: unknown ERROR: %s",
+                     ssl_err_str().c_str());
           return;
         }
     }  // switch(SSL_get_error(ssl_, ret)) {
@@ -528,7 +557,8 @@ void SSLConn::Accept(SSLConn* peer, SSLContext* ctx) const {
   if (peer->peer_certificate_ != NULL) {
     char cn[SCRATCH_BUF_SIZE];
     X509_NAME* subject = X509_get_subject_name(peer->peer_certificate_);
-    X509_NAME_get_text_by_NID(subject, NID_commonName, cn, SSL_X509_MAX_FIELD_SIZE - 1);
+    X509_NAME_get_text_by_NID(subject, NID_commonName, cn,
+                              SSL_X509_MAX_FIELD_SIZE - 1);
     _LOGGER(LOG_NOTICE, "SSL (%s) connection from: %s, received cert: %s.", 
             SSL_CIPHER_get_name(SSL_get_current_cipher(peer->ssl_)), 
             peer->hostname().c_str(), cn);
@@ -574,80 +604,81 @@ SSLConn SSLConn::Accept(SSLContext* ctx) const {
 // Note, this routine can set an ErrorHandler event.
 void SSLConn::Shutdown(const int unidirectional)
 {
-  if (ssl_ == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): ssl is NULL");
-    return;
-  }
+  if (ssl_ != NULL) {
+    if (fd() == DESCRIPTOR_NULL) {
+      error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): "
+                 "%s\'s socket is not open (i.e., fd is %d)",
+                 hostname().c_str(), DESCRIPTOR_NULL);
+      return;
+    }
 
-  if (fd() == DESCRIPTOR_NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): %s\'s socket is not open (i.e., fd is %d)",
-               hostname().c_str(), DESCRIPTOR_NULL);
-    return;
-  }
+    // From SSL_shutdown(3): When the application is the first party to
+    // send the "close notify" alert, SSL_shutdown() will only send the
+    // alert and then set the SSL_SENT_SHUTDOWN flag (so that the
+    // session is considered good and will be kept in
+    // cache). SSL_shutdown() will then return with 0. If a
+    // unidirectional shutdown is enough (the underlying connection
+    // shall be closed anyway), this first call to SSL_shutdown() is
+    // sufficient. In order to complete the bidirectional shutdown
+    // handshake, SSL_shutdown() must be called again. The second call
+    // will make SSL_shutdown() wait for the peer's "close notify"
+    // shutdown alert. On success, the second call to SSL_shutdown()
+    // will return with 1. If the peer already sent the "close notify"
+    // alert and it was already processed implicitly inside another
+    // function (SSL_read(3)), the SSL_RECEIVED_SHUTDOWN flag is
+    // set. SSL_shutdown() will send the "close notify" alert, set the
+    // SSL_SENT_SHUTDOWN flag and will immediately return with
+    // 1. Whether SSL_RECEIVED_SHUTDOWN is already set can be checked
+    // using the SSL_get_shutdown() (see also SSL_set_shutdown(3) call.
+    // It is therefore recommended, to check the return value of
+    // SSL_shutdown() and call SSL_shutdown() again, if the
+    // bidirectional shutdown is not yet complete (return value of the
+    // first call is 0). As the shutdown is not specially handled in the
+    // SSLv2 protocol, SSL_shutdown() will succeed on the first call.
 
-  // From SSL_shutdown(3): When the application is the first party to
-  // send the "close notify" alert, SSL_shutdown() will only send the
-  // alert and then set the SSL_SENT_SHUTDOWN flag (so that the
-  // session is considered good and will be kept in
-  // cache). SSL_shutdown() will then return with 0. If a
-  // unidirectional shutdown is enough (the underlying connection
-  // shall be closed anyway), this first call to SSL_shutdown() is
-  // sufficient. In order to complete the bidirectional shutdown
-  // handshake, SSL_shutdown() must be called again. The second call
-  // will make SSL_shutdown() wait for the peer's "close notify"
-  // shutdown alert. On success, the second call to SSL_shutdown()
-  // will return with 1. If the peer already sent the "close notify"
-  // alert and it was already processed implicitly inside another
-  // function (SSL_read(3)), the SSL_RECEIVED_SHUTDOWN flag is
-  // set. SSL_shutdown() will send the "close notify" alert, set the
-  // SSL_SENT_SHUTDOWN flag and will immediately return with
-  // 1. Whether SSL_RECEIVED_SHUTDOWN is already set can be checked
-  // using the SSL_get_shutdown() (see also SSL_set_shutdown(3) call.
-  // It is therefore recommended, to check the return value of
-  // SSL_shutdown() and call SSL_shutdown() again, if the
-  // bidirectional shutdown is not yet complete (return value of the
-  // first call is 0). As the shutdown is not specially handled in the
-  // SSLv2 protocol, SSL_shutdown() will succeed on the first call.
+    // Send our 'close notify' and check the return code ...
+    int ret = SSL_shutdown(ssl_);
+    if (!ret && !unidirectional)
+      ret = SSL_shutdown(ssl_);  // wait for their 'close notify'
 
-  // Send our 'close notify' and check the return code ...
-  int ret = SSL_shutdown(ssl_);
-  if (!ret && !unidirectional)
-    ret = SSL_shutdown(ssl_);  // wait for their 'close notify'
+    // TODO(aka): If we want ever want a "to" or "from", we need to
+    // set the TCPConn::server flag!  (which should be called *direction* flag!
 
-  // TODO(aka): If we want ever want a "to" or "from", we need to
-  // set the TCPConn::server flag!
+    if (ret >= 0)
+      _LOGGER(LOG_INFO, "Closed SSL connection with: %s.", hostname().c_str());
 
-  if (ret >= 0)
-    _LOGGER(LOG_INFO, "Closed SSL connection with: %s.", hostname().c_str());
-
-  // Check for ERRORS ...
-  if (ret < 0) {
-    switch (SSL_get_error(ssl_, ret)) {
-      case SSL_ERROR_WANT_READ :
-        // Fall through ...
-      case SSL_ERROR_WANT_WRITE :
-        {
-          if (IsBlocking()) {
-            error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): "
-                       "Recevived SSL_ERROR_WANT_READ|WRITE on blocking connection with %s",
-                       hostname().c_str());
-          } else {
-            _LOGGER(LOG_DEBUGGING, "SSLConn::Shutdown(): "
-                    "Recevived SSL_ERROR_WANT_READ|WRITE on non-blocking connection with %s.",
-                    hostname().c_str());
-            return;  // go back and wait
+    // Check for ERRORS ...
+    if (ret < 0) {
+      switch (SSL_get_error(ssl_, ret)) {
+        case SSL_ERROR_WANT_READ :
+          // Fall through ...
+        case SSL_ERROR_WANT_WRITE :
+          {
+            if (IsBlocking()) {
+              error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): "
+                         "Recevived SSL_ERROR_WANT_READ|WRITE "
+                         "on blocking connection with %s",
+                         hostname().c_str());
+            } else {
+              _LOGGER(LOG_DEBUGGING, "SSLConn::Shutdown(): "
+                      "Recevived SSL_ERROR_WANT_READ|WRITE "
+                      "on non-blocking connection with %s.",
+                      hostname().c_str());
+              return;  // go back and wait
+            }
           }
-        }
-        break;
+          break;
 
-      default :
-        error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): Unknown ERROR with %s: %s", 
-                   hostname().c_str(), ssl_err_str().c_str());
-        break;
-    }  // switch (SSL_get_error(ssl_, ret)) {
+        default :
+          error.Init(EX_SOFTWARE, "SSLConn::Shutdown(): "
+                     "Unknown ERROR with %s: %s", 
+                     hostname().c_str(), ssl_err_str().c_str());
+          break;
+      }  // switch (SSL_get_error(ssl_, ret)) {
 
-    // If we made it here, we should have set an ErrorHandler event.
-  }
+      // If we made it here, we should have set an ErrorHandler event.
+    }
+  }  // if (ssl_ != NULL) {
 
   TCPConn::Close();
 
@@ -659,10 +690,8 @@ void SSLConn::Shutdown(const int unidirectional)
 //
 // Note, this routine can set an ErrorHandler event.
 ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
-  if (ssl_ == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Write(): ssl is NULL");
-    return 0;
-  }
+  if (ssl_ == NULL)
+    return TCPConn::Write(buf, buf_len);
 
   // SSL_write(3) will write *at most* buf_len into a SSL connection.  
   //
@@ -707,7 +736,8 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
     switch(SSL_get_error(ssl_, bytes_wrote)) {
       case SSL_ERROR_ZERO_RETURN :
         {
-          _LOGGER(LOG_WARNING, "SSLConn::Write(): %s unexpectedly sent \'close notify\' from %s.",
+          _LOGGER(LOG_WARNING, "SSLConn::Write(): "
+                  "%s unexpectedly sent \'close notify\' from %s.",
                   hostname().c_str());
           Shutdown(0);  // send our close notify
         }
@@ -725,9 +755,12 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
 
         if (!ERR_peek_error()) {
           _LOGGER(LOG_WARNING, "Received EOF from %s.", hostname().c_str());
-          SSL_set_shutdown(ssl_, SSL_SENT_SHUTDOWN);  // mark the SSL connection as closed
+          SSL_set_shutdown(ssl_, SSL_SENT_SHUTDOWN);  // mark the SSL
+                                                      // connection as
+                                                      // closed
         } else {
-          error.Init(EX_SOFTWARE, "SSLConn::Write(): Received SSL_ERROR_SYSCALL: "
+          error.Init(EX_SOFTWARE, "SSLConn::Write(): "
+                     "Received SSL_ERROR_SYSCALL: "
                      "%s terminated connection: %s", 
                      hostname().c_str(), ssl_err_str().c_str());
           return 0;
@@ -736,13 +769,14 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
 
       case SSL_ERROR_SSL :
         _LOGGER(LOG_WARNING, "SSLConn::Write(): Received SSL_ERROR_SSL: "
-                "%s terminated connection: %s", hostname().c_str(), ssl_err_str().c_str());
+                "%s terminated connection: %s", 
+                hostname().c_str(), ssl_err_str().c_str());
         break;
 
       default:
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Write(): returned 0, unknown ERROR: %s", 
-                     ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Write(): "
+                     "returned 0, unknown ERROR: %s", ssl_err_str().c_str());
           return 0;
         }
     }  // switch(SSL_get_error(ssl_, ret)) {
@@ -815,7 +849,8 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
 
       default:
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Write() unknown ERROR: %s", ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Write() unknown ERROR: %s",
+                     ssl_err_str().c_str());
           return bytes_wrote;
         }
     }  // switch(SSL_get_error(ssl_, ret)) {
@@ -836,10 +871,8 @@ ssize_t SSLConn::Write(const char* buf, const ssize_t buf_len) {
 // of char*, in-order to be able to resize the buffer while in this
 // routine ...
 ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
-  if (ssl_ == NULL) {
-    error.Init(EX_SOFTWARE, "SSLConn::Read(): ssl is NULL");
-    return 0;
-  }
+  if (ssl_ == NULL)
+    return TCPConn::Read(buf_len, buf, eof);
 
   // SSL_read(3) will read *at most* one SSL record.  
   //
@@ -921,7 +954,9 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
           *eof = true;  // we got EOF
           _LOGGER(LOG_WARNING, "SSLConn::Read(): Received EOF from %s.",
                   hostname().c_str());
-          SSL_set_shutdown(ssl_, SSL_SENT_SHUTDOWN);  // mark the SSL connection as closed
+          SSL_set_shutdown(ssl_, SSL_SENT_SHUTDOWN);  // mark the SSL
+                                                      // connection as
+                                                      // closed
         } else {
           error.Init(EX_SOFTWARE, "SSLConn::Read(): Received SSL_ERROR_SYSCALL: "
                      "%s terminated connection: %s", 
@@ -938,8 +973,8 @@ ssize_t SSLConn::Read(const ssize_t buf_len, char* buf, bool* eof) {
 
       default:
         {
-          error.Init(EX_SOFTWARE, "SSLConn::Read(): returned 0, unknown ERROR: %s", 
-                     ssl_err_str().c_str());
+          error.Init(EX_SOFTWARE, "SSLConn::Read(): "
+                     "returned 0, unknown ERROR: %s", ssl_err_str().c_str());
           return 0;
         }
     }
@@ -1050,7 +1085,7 @@ ssize_t SSLConn::ReadExhaustive(const ssize_t buf_len, char* buf,
   
   // Note, this routine doesn't make a lot of sense for blocking
   // connections, as read() will block after the first call() waiting
-  // for more data (not too mention that the logic in the loop
+  // for more data (not to mention that the logic in the loop
   // requires seeing an EOF -- which requires the remote side to
   // close() -- to exit cleanly).  Until I've reworked this routine,
   // the current plan is that blocking connections will use

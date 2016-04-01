@@ -13,7 +13,7 @@
 using namespace std;
 
 #include "File.h"
-#include "TCPConn.h"
+#include "SSLConn.h"
 #include "MsgHdr.h"      // type of framing used
 #include "MsgInfo.h"
 
@@ -23,14 +23,15 @@ using namespace std;
 
 // Non-class specific utilities.
 
-/** Class to manage a TCP/IP session.
+/** Class to manage a SSL/TLS or unencrypted TCP/IP session.
  *
- *  The TCPSession class manages a TCP/IP session.  This includes;
- *  providing staging (either memory buffers or files) to hold data
- *  either to be read from or written to the socket (witin the TCPConn
- *  base-class).  Moreover, It uses the MsgHdr class to determine when
- *  it has in its possession the *complete* header information (i.e.,
- *  framing), such that it can commence processing of the the message.
+ *  The TCPSession class manages a SSL/TLS session or a straight
+ *  TCP/IP session.  This includes; providing staging (either memory
+ *  buffers or files) to hold data either to be read from or written
+ *  to the socket (witin the SSLConn or TCPConn base-class).
+ *  Moreover, It uses the MsgHdr class to determine when it has in its
+ *  possession the *complete* header information (i.e., framing), such
+ *  that it can commence processing of the the message.
  *
  *  The TCPSession class *should be* thread safe, i.e., any instance,
  *  e.g., a connection to a specific host, can process multiple
@@ -40,14 +41,21 @@ using namespace std;
  *  class.  There is a separate lock for incoming and outgoing
  *  operations.
  *
+ *  Notes:
+ *
+ *  - This Class treats the connection the same, i.e., it's up to
+ *    SSLConn to defer to TCPConn if using TCP.  This is usually
+ *    accomplished by checking for a NULL SSL* object in the SSLConn
+ *    routines.
+ *
  *  RCSID: $Id: TCPSession.h,v 1.3 2014/04/11 17:42:15 akadams Exp $
  *
- *  @see TCPConn
+ *  @see SSLConn
  *  @see MsgHdr
  *
  *  @author Andrew K. Adams <akadams@psc.edu>
  */
-class TCPSession : public TCPConn {
+class TCPSession : public SSLConn {
  public:
   /** Constructor.
    *
@@ -213,7 +221,6 @@ class TCPSession : public TCPConn {
   bool IsIncomingDataStreaming(void) const { 
     return (rpending_.storage == SESSION_USE_DISC) ? true : false; }
   bool IsIncomingMsgComplete(void) const {
-    err(EX_SOFTWARE, "IsOutgoingMsgComplete() broken, see SSLSession!\n");
     return ((rpending_.initialized == 1) && 
             ((rpending_.file_offset >= 
               rpending_.body_len) ||
@@ -236,7 +243,7 @@ class TCPSession : public TCPConn {
 
  protected:
   // Data members.
-  uint8_t framing_type_;        // framing type of TCP session (@see MsgHdr)
+  uint8_t framing_type_;        // framing type of TCP/IP session (@see MsgHdr)
   uint16_t handle_;             // session id (for easier STL access)
 
   bool synchronize_connection_; // flag to show we want to synchronize session

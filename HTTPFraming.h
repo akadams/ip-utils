@@ -82,8 +82,9 @@ class HTTPFraming {
   
   /** Routine to return the HTTP framing header length.
    *
+   *  @param abs_path a bool to signal if we want an abs_path or absoluteURI
    */
-  size_t hdr_len(void) const;
+  size_t hdr_len(const bool abs_path) const;
 
   /** Routine to return the 'Content-Length' field-value.
    *
@@ -127,8 +128,10 @@ class HTTPFraming {
    *  The start-line is either the request-line in a REQUEST or the
    *  status-line in a RESPONSE.
    *
+   *  @param abs_path a bool to signal if we want an abs_path or absoluteURI
+   *  @return a string housing the start-line
    */
-  string print_start_line(void) const;
+  string print_start_line(const bool abs_path) const;
 
   /** Routine to print the HTTP message-headers contained within the object.
    *
@@ -140,8 +143,12 @@ class HTTPFraming {
    *  The print_hdrs() routine calls print_start_line() and
    *  print_msg_hdrs() to get the work done.
    *
+   *  @param offset is a control to allow you to print-out only the
+   *  message-headers
+   *  @param abs_path a bool to signal if we want an
+   *  abs_path or absoluteURI @return a string housing the start-line
    */
-  string print_hdr(const int offset) const;
+  string print_hdr(const int offset, const bool abs_path) const;
 
   /** Routine to initalize an HTTPFraming object as a REQUEST message.
    *

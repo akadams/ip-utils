@@ -197,8 +197,8 @@ int HTTPFraming::operator ==(const HTTPFraming& other)
 #endif
 
 // Accessors.
-size_t HTTPFraming::hdr_len(void) const {
-  return strlen(print_hdr(0).c_str());
+size_t HTTPFraming::hdr_len(const bool abs_path) const {
+  return strlen(print_hdr(0, abs_path).c_str());
 }
 
 // Routine to return the 'Content-Length' field-name.
@@ -350,17 +350,20 @@ string HTTPFraming::print(void) const {
     snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, 
              "%s %s HTTP/%d.%d %lu %lu %s",
              method_names[method()], uri_.print().c_str(),
-             major_, minor_, (unsigned long)msg_len(), (unsigned long)hdr_len(), 
+             major_, minor_, (unsigned long)msg_len(),
+             (unsigned long)hdr_len(false), 
              content_type().c_str());
   } else if (status_code_ != HTTPFRAMING_STATUS_CODE_NULL) {
     // We are a RESPONSE.
     snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE,
              "HTTP/%d.%d %d %lu %lu %s", 
-             major_, minor_, status_code_, (unsigned long)msg_len(), (unsigned long)hdr_len(), 
+             major_, minor_, status_code_, (unsigned long)msg_len(),
+             (unsigned long)hdr_len(false), 
              content_type().c_str());
   } else {
     snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%d %d %lu %lu", 
-             method_, status_code_, (unsigned long)msg_len(), (unsigned long)hdr_len());
+             method_, status_code_, (unsigned long)msg_len(),
+             (unsigned long)hdr_len(false));
   }
 
   return tmp_str;
@@ -368,14 +371,19 @@ string HTTPFraming::print(void) const {
 
 // Routine to print an HTTP status-line (dervived from the HTTPFraming
 // object).
-string HTTPFraming::print_start_line(void) const {
+string HTTPFraming::print_start_line(const bool abs_path) const {
   string tmp_str(SCRATCH_BUF_SIZE, '\0');  // '\0' so strlen() works
 
   if (method_ != METHOD_NULL) {
     // We are a request.
-    snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%s %s HTTP/%d.%d",
-                 method_names[method()], 
-                 uri_.print().c_str(), major_, minor_);
+    if (abs_path)
+      snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%s %s HTTP/%d.%d",
+               method_names[method()], 
+               uri_.print_abs_path().c_str(), major_, minor_);
+    else
+      snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%s %s HTTP/%d.%d",
+               method_names[method()], 
+               uri_.print_absoluteURI().c_str(), major_, minor_);
   } else {  // if (method != METHOD_NULL)
     // We are a response.
     const char* phrase = status_code_phrase(status_code());
@@ -435,15 +443,15 @@ string HTTPFraming::print_msg_hdrs(void) const {
   return tmp_str;
 }
 
-// Routine to print out the HTTP Response or Request header.  Theo nly
+// Routine to print out the HTTP Response or Request header.  The only
 // trick here is that we need to insert the empty line (CRLF) at the
 // end of the message (as well as terminating the status-line with a
 // CRLF).
-string HTTPFraming::print_hdr(const int offset) const {
+string HTTPFraming::print_hdr(const int offset, const bool abs_path) const {
   string tmp_str(SCRATCH_BUF_SIZE, '\0');  // '\0' so strlen() works
 
   int n = snprintf((char*)tmp_str.c_str(), SCRATCH_BUF_SIZE, "%s\r\n%s\r\n",
-                   print_start_line().c_str(), print_msg_hdrs().c_str());
+                   print_start_line(abs_path).c_str(), print_msg_hdrs().c_str());
   if (n >= SCRATCH_BUF_SIZE) {
     // TODO(aka) We need to resize tmp_str and try again!
     _LOGGER(LOG_WARNING, "HTTPFraming::print_hdr(): TODO(aka) "
