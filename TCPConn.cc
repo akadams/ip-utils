@@ -135,7 +135,7 @@ void TCPConn::Clone(const TCPConn& src) {
 //
 // Note, this routine can set an ErrorHandler event.
 void TCPConn::Init(const char* host, const int address_family, int retry_cnt) {
-  IPComm::Init(host, address_family, retry_cnt);
+  IPComm::Init(host, address_family, retry_cnt);  // get the work done elsewhere
   if (error.Event()) {
     error.AppendMsg("TCPConn::Init(): ");
     return;

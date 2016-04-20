@@ -145,10 +145,7 @@ string SSLConn::print(void) const {
 //
 // Note, this routine can set an ErrorHandler event.
 void SSLConn::Init(const char* host, const int address_family, int retry_cnt) {
-  // TODO(aka) For some reason, we don't have a TCPConn::Init().  This
-  // may be expected behavior, but it seems a bit odd.
-  printf("XXX Add TCPConn::Init()!\n");
-  IPComm::Init(host, address_family, retry_cnt);
+  TCPConn::Init(host, address_family, retry_cnt);  // get the work done elsewhere
   if (error.Event()) {
     error.AppendMsg("SSLConn::Init(): ");
     return;
