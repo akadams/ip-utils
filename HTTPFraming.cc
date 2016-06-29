@@ -1167,6 +1167,21 @@ bool HTTPFraming::ParseResponseHdr(const char* buf, const size_t len,
     _LOGGER(LOG_NOTICE, "HTTPFraming::ParseResponseHdr(): "
             "status code %d, len: %ld, n: %ld.", status_code_, len, n);
 #endif
+
+    // Life should be good, *unless* they requested chunked data but
+    // we haven't gotten that data from the sender yet ...
+
+    static const char* kMimeChunked = MIME_CHUNKED;
+    if (strlen(kMimeChunked) == strlen(transfer_encoding().c_str()) &&
+        !strncasecmp(kMimeChunked, transfer_encoding().c_str(), 
+                     strlen(kMimeChunked))) {
+      // Great, there's a chunked message-body, joy.  We need to clear
+      // our headers and go back and wait for more data.  This sucks
+      // ...
+
+      msg_hdrs_.clear();
+      return false;
+    }
   }
 
   *bytes_used = len - n;  // amount of data we used in buf

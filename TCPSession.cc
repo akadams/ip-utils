@@ -20,6 +20,7 @@
 
 // Non-class specific defines & data structures.
 const size_t kDefaultBufSize = 4096;
+const time_t kDefaultTimeout = 300;  // 5 minutes
 
 uint16_t unique_session_id = 65;  // start at least 6 bits over
 
@@ -36,6 +37,7 @@ TCPSession::TCPSession(const uint8_t framing_type)
 
   framing_type_ = framing_type;
   handle_ = unique_session_id++;
+  timeout_ = time(NULL) + kDefaultTimeout;
   synchronize_connection_ = false;
   synchronize_status_ = 0;
   rbuf_ = NULL;
@@ -105,6 +107,7 @@ TCPSession::TCPSession(const TCPSession& src)
   // If we made it here, our mallocs worked, so set the rest of the object.
   framing_type_ = src.framing_type_;
   handle_ = src.handle_;
+  timeout_ = src.timeout_;
   synchronize_connection_ = src.synchronize_connection_;
   synchronize_status_ = src.synchronize_status_;
 

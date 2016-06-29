@@ -6,6 +6,7 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include <time.h>
 
 #include <string>
 #include <queue>
@@ -82,6 +83,7 @@ class TCPSession : public SSLConn {
   // Accessors.
   uint8_t framing_type(void) const { return framing_type_; }
   uint16_t handle(void) const { return handle_; }
+  time_t timeout(void) const {return timeout_; }
   uint8_t synchronize_status(void) const { return synchronize_status_; }
   char* rbuf(void) const { return rbuf_; }
   ssize_t rbuf_size(void) const { return rbuf_size_; }
@@ -245,6 +247,10 @@ class TCPSession : public SSLConn {
   // Data members.
   uint8_t framing_type_;        // framing type of TCP/IP session (@see MsgHdr)
   uint16_t handle_;             // session id (for easier STL access)
+  time_t timeout_;              // expiration timer for connection if
+                                // no data resides in either read or
+                                // write buffers, TODO(aka) probably
+                                // should include a keep-alive flag
 
   bool synchronize_connection_; // flag to show we want to synchronize session
   uint8_t synchronize_status_;  // flag to show what stage the framing
