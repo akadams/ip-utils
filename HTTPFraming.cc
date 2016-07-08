@@ -1502,7 +1502,7 @@ bool HTTPFraming::ParseChunkedMsgBody(const char* buf, const size_t len,
           (*msg_body_size + chunk_size + 1);
       if ((*msg_body = (char*)realloc(*msg_body, new_size)) == NULL) {
         error.Init(EX_OSERR,  "HTTPFraming::ParseChunkedMsgBody(): "
-                   "realloc(3) failed for %ulb", new_size);
+                   "realloc(3) failed for %lub", (unsigned long)new_size);
         return false;
       }
 

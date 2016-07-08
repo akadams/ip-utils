@@ -369,7 +369,8 @@ bool TCPSession::InitIncomingMsg(void) {
   size_t chunked_msg_body_size = kDefaultBufSize;
   if ((chunked_msg_body = (char*)calloc(chunked_msg_body_size, 1)) == NULL) {
     error.Init(EX_OSERR, "TCPSession::InitIncomingMsg(): "
-               "calloc(3) failed for size %ulb", chunked_msg_body_size);
+               "calloc(3) failed for size %lub", 
+               (unsigned long)chunked_msg_body_size);
     return false;
   }
 
